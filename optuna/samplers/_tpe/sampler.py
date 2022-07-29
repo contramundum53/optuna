@@ -890,20 +890,19 @@ def _calculate_weights_below_for_multi_objective(
     reference_point = _calc_reference_point(lvals_calculate_hv)
     hv = _compute_hypervolume(lvals_calculate_hv, reference_point)
 
-    weights_all = np.zeros(len(lvals))
+    weights = np.zeros(len(lvals))
     for i in range(len(lvals)):
         if hv_mask[i]:
             new_mask = hv_mask.copy()
             new_mask[i] = False
             new_hv = _compute_hypervolume(lvals[new_mask], reference_point)
             contribution = hv - new_hv
-            weights_all[i] = contribution
+            weights[i] = contribution
 
-    max_weight = np.max(weights_all[hv_mask], initial=0)
-    weights_all[is_feasible & (~has_posinf) & has_neginf] = max_weight
+    max_weight = np.max(weights[hv_mask], initial=0)
+    weights[is_feasible & (~has_posinf) & has_neginf] = max_weight
 
-    weights_below = (weights_all + EPS) / (max_weight + EPS)
-    return weights_below
+    return (weights + EPS) / (max_weight + EPS)
 
 
 
