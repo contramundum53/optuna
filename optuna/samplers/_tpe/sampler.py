@@ -876,7 +876,6 @@ def _calculate_weights_below_for_multi_objective(
 
     is_nan_item = np.isnan(list(config_values.values())[0])[indices]
     lvals = np.asarray([v for _, v in loss_vals])[indices][~is_nan_item]
-    print("hoge", lvals)
 
     is_feasible = np.ones(len(lvals), dtype=bool)
     if violations is not None:
@@ -885,32 +884,26 @@ def _calculate_weights_below_for_multi_objective(
     has_posinf = np.any(np.isposinf(lvals), axis=1)
     has_neginf = np.any(np.isneginf(lvals), axis=1)
 
-    print(is_feasible, has_posinf, has_neginf)
     hv_mask = is_feasible & (~has_posinf) & (~has_neginf)
 
     lvals_calculate_hv = lvals[hv_mask]
 
     reference_point = _calc_reference_point(lvals_calculate_hv)
     hv = _compute_hypervolume(lvals_calculate_hv, reference_point)
-    print(hv, reference_point, lvals_calculate_hv)
 
     weights_all = np.zeros(len(lvals))
     for i in range(len(lvals)):
         if hv_mask[i]:
             new_mask = hv_mask.copy()
             new_mask[i] = False
-            print(new_mask, lvals[new_mask], reference_point)
             new_hv = _compute_hypervolume(lvals[new_mask], reference_point)
-            print(hv, new_hv)
             contribution = hv - new_hv
-            print(contribution)
             weights_all[i] = contribution
 
     max_weight = np.max(weights_all[hv_mask], initial=0)
     weights_all[is_feasible & (~has_posinf) & has_neginf] = max_weight
 
     weights_below = (weights_all + EPS) / (max_weight + EPS)
-    print(weights_below)
     return weights_below
 
 
