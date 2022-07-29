@@ -773,11 +773,36 @@ def _split_observation_pairs(
         if subset_size > 0:
             rank_i_lvals = lvals[nondomination_ranks == i]
             rank_i_indices = indices[nondomination_ranks == i]
-            rank_i_lvals, reference_point = _clip_inf_and_calc_reference_point(rank_i_lvals)
-            selected_indices = _solve_hssp(
-                rank_i_lvals, rank_i_indices, subset_size, reference_point
-            )
-            indices_below[last_idx:] = selected_indices
+
+            has_posinf = np.any(np.isposinf(rank_i_lvals), axis=1)
+            has_neginf = np.any(np.isneginf(rank_i_lvals), axis=1)
+
+            good_points = has_neginf & (~has_posinf)
+            good_size = min(subset_size, np.count_nonzero(good_points))
+            # Choose new ones on tie for diversity
+            indices_below[last_idx:last_idx + good_size] = rank_i_indices[good_points][:-good_size:-1]
+            last_idx += good_size
+            subset_size -= good_size
+
+            if subset_size != 0:
+                finite_points = (~has_neginf) & (~has_posinf)
+                finite_size = np.count_nonzero(finite_points)
+
+                if finite_size <= subset_size:
+                    print(finite_size, subset_size, finite_points)
+                    indices_below[last_idx:last_idx + finite_size] = rank_i_indices[finite_points]
+                    last_idx += finite_size
+                    subset_size -= finite_size
+                    indices_below[last_idx:] = rank_i_indices[has_posinf][:-subset_size:-1]
+
+                else:
+                    finite_lvals = rank_i_lvals[finite_points]
+                    reference_point = _calc_reference_point(finite_lvals)
+                    # rank_i_lvals, reference_point = _clip_inf_and_calc_reference_point(rank_i_lvals)
+                    selected_indices = _solve_hssp(
+                        finite_lvals, rank_i_indices[finite_points], subset_size, reference_point
+                    )
+                    indices_below[last_idx:] = selected_indices
 
         indices_above = np.setdiff1d(indices, indices_below)
 
@@ -848,82 +873,152 @@ def _calculate_weights_below_for_multi_objective(
     indices: np.ndarray,
     violations: Optional[List[float]],
 ) -> np.ndarray:
-    # Multi-objective TPE only sees the first parameter to determine the weights.
-    # In the call of `sample_relative`, this logic makes sense because we only have the
-    # intersection search space or group decomposed search space. This means one parameter
-    # misses the one trial, then the other parameter must miss the trial, in this call of
-    # `sample_relative`.
-    # In the call of `sample_independent`, we only have one parameter so the logic makes sense.
-    if violations is None:
-        feasible_mask = np.ones(len(indices), dtype=bool)
-    else:
-        # Hypervolume contributions are calculated only using feasible trials.
-        feasible_mask = np.array(violations, dtype=float)[indices] == 0
 
-    # Multi-objective TPE does not support pruning, so it ignores the ``step``.
-    lvals = np.asarray([v for _, v in loss_vals])[indices[feasible_mask]]
+    is_nan_item = np.isnan(list(config_values.values())[0])[indices]
+    lvals = np.asarray([v for _, v in loss_vals])[indices][~is_nan_item]
+    print("hoge", lvals)
 
-    # Calculate weights based on hypervolume contributions.
-    n_below = len(lvals)
-    weights_below: np.ndarray
-    if n_below == 0:
-        weights_below = np.asarray([])
-    elif n_below == 1:
-        weights_below = np.asarray([1.0])
-    else:
+    is_feasible = np.ones(len(lvals), dtype=bool)
+    if violations is not None:
+        is_feasible = (np.array(violations, dtype=float) == 0)
+    
+    has_posinf = np.any(np.isposinf(lvals), axis=1)
+    has_neginf = np.any(np.isneginf(lvals), axis=1)
 
-        lvals, reference_point = _clip_inf_and_calc_reference_point(lvals)
+    print(is_feasible, has_posinf, has_neginf)
+    hv_mask = is_feasible & (~has_posinf) & (~has_neginf)
 
-        hv = _compute_hypervolume(lvals, reference_point)
-        indices_mat = ~np.eye(n_below).astype(bool)
-        contributions = np.asarray(
-            [
-                hv - _compute_hypervolume(lvals[indices_mat[i]], reference_point)
-                for i in range(n_below)
-            ]
-        )
-        contributions += EPS
-        weights_below = np.clip(contributions / np.max(contributions), 0, 1)
+    lvals_calculate_hv = lvals[hv_mask]
 
-    cvals = list(config_values.values())[0][indices]
-    # For now, EPS weight is assigned to infeasible trials.
-    weights_below_all = np.full(len(indices), EPS)
-    weights_below_all[feasible_mask] = weights_below
-    weights_below_all = weights_below_all[~np.isnan(cvals)]
-    return weights_below_all
+    reference_point = _calc_reference_point(lvals_calculate_hv)
+    hv = _compute_hypervolume(lvals_calculate_hv, reference_point)
+    print(hv, reference_point, lvals_calculate_hv)
+
+    weights_all = np.zeros(len(lvals))
+    for i in range(len(lvals)):
+        if hv_mask[i]:
+            new_mask = hv_mask.copy()
+            new_mask[i] = False
+            print(new_mask, lvals[new_mask], reference_point)
+            new_hv = _compute_hypervolume(lvals[new_mask], reference_point)
+            print(hv, new_hv)
+            contribution = hv - new_hv
+            print(contribution)
+            weights_all[i] = contribution
+
+    max_weight = np.max(weights_all[hv_mask], initial=0)
+    weights_all[is_feasible & (~has_posinf) & has_neginf] = max_weight
+
+    weights_below = (weights_all + EPS) / (max_weight + EPS)
+    print(weights_below)
+    return weights_below
 
 
-def _clip_inf_and_calc_reference_point(lvals: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Clip inf values in lvals and calculate the reference point.
 
-    This function satisfies the following axioms:
-    1. Clipped lvals and the calculated reference point only contain finite values.
-    2. Clipping preserves the original order of lvals.
-    3. Clipped lvals are always smaller than or equal to the calculated reference point.
-    """
+
+
+    # # Multi-objective TPE only sees the first parameter to determine the weights.
+    # # In the call of `sample_relative`, this logic makes sense because we only have the
+    # # intersection search space or group decomposed search space. This means one parameter
+    # # misses the one trial, then the other parameter must miss the trial, in this call of
+    # # `sample_relative`.
+    # # In the call of `sample_independent`, we only have one parameter so the logic makes sense.
+    # if violations is None:
+    #     feasible_mask = np.ones(len(indices), dtype=bool)
+    # else:
+    #     # Hypervolume contributions are calculated only using feasible trials.
+    #     feasible_mask = np.array(violations, dtype=float)[indices] == 0
+
+
+    # # Multi-objective TPE does not support pruning, so it ignores the ``step``.
+    # lvals = np.asarray([v for _, v in loss_vals])[indices[feasible_mask]]
+
+    # # Calculate weights based on hypervolume contributions.
+    # has_posinf = np.any(np.isposinf(lvals), axis=1)
+    # has_neginf = np.any(np.isneginf(lvals), axis=1)
+    # finite_values_only = (~has_posinf) & (~has_neginf)
+    
+    # lvals_finite = lvals[finite_values_only]
+
+
+    
+
+
+    # n_below = len(lvals_finite)
+    # weights_below: np.ndarray
+    # if n_below == 0:
+    #     weights_below = np.asarray([])
+    # elif n_below == 1:
+    #     weights_below = np.asarray([1.0])
+    # else:
+
+    #     lvals_finite, reference_point = _clip_inf_and_calc_reference_point(lvals_finite)
+    #     hv = _compute_hypervolume(lvals_finite, reference_point)
+    #     indices_mat = ~np.eye(n_below).astype(bool)
+    #     contributions = np.asarray(
+    #         [
+    #             hv - _compute_hypervolume(lvals_finite[indices_mat[i]], reference_point)
+    #             for i in range(n_below)
+    #         ]
+    #     )
+    #     contributions += EPS
+    #     weights_below = np.clip(contributions / np.max(contributions), 0, 1)
+
+
+
+
+    # return weights_below_all[indices]
+
+
+    # # For now, EPS weight is assigned to infeasible trials.
+    # weights_below_all = np.full(len(indices), EPS)
+    # weights_below_all[feasible_mask] = weights_below
+    # weights_below_all = weights_below_all[~np.isnan(cvals)]
+    # return weights_below_all
+
+
+def _calc_reference_point(lvals: np.ndarray) -> np.ndarray:
     worst_point = np.amax(lvals, axis=0, initial=-np.inf, where=~np.isposinf(lvals))
     # When there are no finite values for a dimension, we replace +inf as +EPS and -inf as -EPS.
     worst_point[worst_point == -np.inf] = 0.0
-    # For positive worst_point, we use 1.1 * worst_point as the replacement of +inf.
-    # For negative worst_point, we use 0.9 * worst_point as the replacement of +inf.
-    # For worst point that is almost zero, we use worst_point + EPS as the replacement of +inf.
-    posinf_replacement = np.maximum.reduce(
+    # For positive worst_point, we use 1.1 * worst_point as the reference point.
+    # For negative worst_point, we use 0.9 * worst_point as the reference point.
+    # For worst point that is almost zero, we use worst_point + EPS as the reference point.
+    return np.maximum.reduce(
         [1.1 * worst_point, 0.9 * worst_point, worst_point + EPS]
     )
 
-    best_point = np.amin(lvals, axis=0, initial=np.inf, where=~np.isneginf(lvals))
-    # When there are no finite values for a dimension, we replace +inf as +EPS and -inf as -EPS.
-    best_point[best_point == np.inf] = 0.0
-    # For positive worst_point, we use 0.5 * best_point as the replacement of -inf.
-    # For negative worst_point, we use 2.0 * best_point as the replacement of -inf.
-    # For worst point that is almost zero, we use best_point - EPS as the replacement of -inf.
-    neginf_replacement = np.minimum.reduce([2 * best_point, 0.5 * best_point, best_point - EPS])
+# def _clip_inf_and_calc_reference_point(lvals: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+#     """Clip inf values in lvals and calculate the reference point.
 
-    new_lvals = lvals.copy()
-    is_posinf = lvals == np.inf
-    new_lvals[is_posinf] = np.broadcast_to(posinf_replacement, lvals.shape, subok=True)[is_posinf]
-    is_neginf = lvals == -np.inf
-    new_lvals[is_neginf] = np.broadcast_to(neginf_replacement, lvals.shape, subok=True)[is_neginf]
+#     This function satisfies the following axioms:
+#     1. Clipped lvals and the calculated reference point only contain finite values.
+#     2. Clipping preserves the original order of lvals.
+#     3. Clipped lvals are always smaller than or equal to the calculated reference point.
+#     """
+#     worst_point = np.amax(lvals, axis=0, initial=-np.inf, where=~np.isposinf(lvals))
+#     # When there are no finite values for a dimension, we replace +inf as +EPS and -inf as -EPS.
+#     worst_point[worst_point == -np.inf] = 0.0
+#     # For positive worst_point, we use 1.1 * worst_point as the replacement of +inf.
+#     # For negative worst_point, we use 0.9 * worst_point as the replacement of +inf.
+#     # For worst point that is almost zero, we use worst_point + EPS as the replacement of +inf.
+#     posinf_replacement = np.maximum.reduce(
+#         [1.1 * worst_point, 0.9 * worst_point, worst_point + EPS]
+#     )
 
-    reference_point = posinf_replacement
-    return new_lvals, reference_point
+#     best_point = np.amin(lvals, axis=0, initial=np.inf, where=~np.isneginf(lvals))
+#     # When there are no finite values for a dimension, we replace +inf as +EPS and -inf as -EPS.
+#     best_point[best_point == np.inf] = 0.0
+#     # For positive worst_point, we use 0.5 * best_point as the replacement of -inf.
+#     # For negative worst_point, we use 2.0 * best_point as the replacement of -inf.
+#     # For worst point that is almost zero, we use best_point - EPS as the replacement of -inf.
+#     neginf_replacement = np.minimum.reduce([2 * best_point, 0.5 * best_point, best_point - EPS])
+
+#     new_lvals = lvals.copy()
+#     is_posinf = lvals == np.inf
+#     new_lvals[is_posinf] = np.broadcast_to(posinf_replacement, lvals.shape, subok=True)[is_posinf]
+#     is_neginf = lvals == -np.inf
+#     new_lvals[is_neginf] = np.broadcast_to(neginf_replacement, lvals.shape, subok=True)[is_neginf]
+
+#     reference_point = posinf_replacement
+#     return new_lvals, reference_point
