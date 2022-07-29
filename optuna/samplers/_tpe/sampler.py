@@ -789,7 +789,6 @@ def _split_observation_pairs(
                 finite_size = np.count_nonzero(finite_points)
 
                 if finite_size <= subset_size:
-                    print(finite_size, subset_size, finite_points)
                     indices_below[last_idx:last_idx + finite_size] = rank_i_indices[finite_points]
                     last_idx += finite_size
                     subset_size -= finite_size
