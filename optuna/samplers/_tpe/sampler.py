@@ -770,39 +770,43 @@ def _split_observation_pairs(
 
         # Hypervolume subset selection problem (HSSP)-based selection
         subset_size = n_below - last_idx
-        if subset_size > 0:
-            rank_i_lvals = lvals[nondomination_ranks == i]
-            rank_i_indices = indices[nondomination_ranks == i]
 
-            has_posinf = np.any(np.isposinf(rank_i_lvals), axis=1)
-            has_neginf = np.any(np.isneginf(rank_i_lvals), axis=1)
+        rank_i_lvals = lvals[nondomination_ranks == i]
+        rank_i_indices = indices[nondomination_ranks == i]
 
-            good_points = has_neginf & (~has_posinf)
-            good_size = min(subset_size, np.count_nonzero(good_points))
-            # Choose new ones on tie for diversity
-            indices_below[last_idx:last_idx + good_size] = rank_i_indices[good_points][:-good_size:-1]
-            last_idx += good_size
-            subset_size -= good_size
+        def extract_n(
+            mask: np.ndarray, 
+            n: int, 
+            choice_func: Callable[[np.ndarray, int], np.ndarray] = lambda arr, n: arr[:len(arr)-n:-1]
+        ) -> np.ndarray:
+            """Choose at most ``n`` elements from `rank_i_indices[mask]` using ``choice_func``.
+            If ``choice_func`` is not given, it chooses the last ``n`` elements.
+            """
+            filtered = rank_i_indices[mask]
+            ret_num = min(len(filtered), n)
+            if ret_num == 0:
+                return np.array([], dtype=np.int64)
+            elif ret_num == len(filtered):
+                return filtered
+            else:
+                return choice_func(filtered, ret_num)
 
-            if subset_size != 0:
-                finite_points = (~has_neginf) & (~has_posinf)
-                finite_size = np.count_nonzero(finite_points)
+        has_posinf = np.any(np.isposinf(rank_i_lvals), axis=1)
+        has_neginf = np.any(np.isneginf(rank_i_lvals), axis=1)
 
-                if finite_size <= subset_size:
-                    indices_below[last_idx:last_idx + finite_size] = rank_i_indices[finite_points]
-                    last_idx += finite_size
-                    subset_size -= finite_size
-                    indices_below[last_idx:] = rank_i_indices[has_posinf][:-subset_size:-1]
+        good_indices = extract_n(has_neginf & (~has_posinf), subset_size)
 
-                else:
-                    finite_lvals = rank_i_lvals[finite_points]
-                    reference_point = _calc_reference_point(finite_lvals)
-                    # rank_i_lvals, reference_point = _clip_inf_and_calc_reference_point(rank_i_lvals)
-                    selected_indices = _solve_hssp(
-                        finite_lvals, rank_i_indices[finite_points], subset_size, reference_point
-                    )
-                    indices_below[last_idx:] = selected_indices
+        finite_mask = (~has_neginf) & (~has_posinf)
+        finite_indices = extract_n(finite_mask, subset_size - len(good_indices),
+            lambda masked_indices, n: _solve_hssp(rank_i_lvals[finite_mask],
+                                        masked_indices,
+                                        n,
+                                        _calc_reference_point(rank_i_lvals[finite_mask]))    
+        )
 
+        bad_indices = extract_n(has_posinf, subset_size - len(good_indices) - len(finite_indices))
+
+        indices_below[last_idx:] = np.concatenate((good_indices, finite_indices, bad_indices))
         indices_above = np.setdiff1d(indices, indices_below)
 
     return indices_below, indices_above
