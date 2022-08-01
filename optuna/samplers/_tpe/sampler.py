@@ -775,11 +775,14 @@ def _split_observation_pairs(
         rank_i_indices = indices[nondomination_ranks == i]
 
         def extract_n(
-            mask: np.ndarray, 
-            n: int, 
-            choice_func: Callable[[np.ndarray, int], np.ndarray] = lambda arr, n: arr[:len(arr)-n:-1]
+            mask: np.ndarray,
+            n: int,
+            choice_func: Callable[[np.ndarray, int], np.ndarray] = lambda arr, n: arr[
+                : len(arr) - n : -1
+            ],
         ) -> np.ndarray:
             """Choose at most ``n`` elements from `rank_i_indices[mask]` using ``choice_func``.
+
             If ``choice_func`` is not given, it chooses the last ``n`` elements.
             """
             filtered = rank_i_indices[mask]
@@ -797,11 +800,15 @@ def _split_observation_pairs(
         good_indices = extract_n(has_neginf & (~has_posinf), subset_size)
 
         finite_mask = (~has_neginf) & (~has_posinf)
-        finite_indices = extract_n(finite_mask, subset_size - len(good_indices),
-            lambda masked_indices, n: _solve_hssp(rank_i_lvals[finite_mask],
-                                        masked_indices,
-                                        n,
-                                        _calc_reference_point(rank_i_lvals[finite_mask]))    
+        finite_indices = extract_n(
+            finite_mask,
+            subset_size - len(good_indices),
+            lambda masked_indices, n: _solve_hssp(
+                rank_i_lvals[finite_mask],
+                masked_indices,
+                n,
+                _calc_reference_point(rank_i_lvals[finite_mask]),
+            ),
         )
 
         bad_indices = extract_n(has_posinf, subset_size - len(good_indices) - len(finite_indices))
@@ -882,8 +889,8 @@ def _calculate_weights_below_for_multi_objective(
 
     is_feasible = np.ones(len(lvals), dtype=bool)
     if violations is not None:
-        is_feasible = (np.array(violations, dtype=float) == 0)
-    
+        is_feasible = np.array(violations, dtype=float) == 0
+
     has_posinf = np.any(np.isposinf(lvals), axis=1)
     has_neginf = np.any(np.isneginf(lvals), axis=1)
 
@@ -909,7 +916,6 @@ def _calculate_weights_below_for_multi_objective(
     return (weights + EPS) / (max_weight + EPS)
 
 
-
 def _calc_reference_point(lvals: np.ndarray) -> np.ndarray:
     worst_point = np.amax(lvals, axis=0, initial=-np.inf, where=~np.isposinf(lvals))
     # When there are no finite values for a dimension, we replace +inf as +EPS and -inf as -EPS.
@@ -917,6 +923,4 @@ def _calc_reference_point(lvals: np.ndarray) -> np.ndarray:
     # For positive worst_point, we use 1.1 * worst_point as the reference point.
     # For negative worst_point, we use 0.9 * worst_point as the reference point.
     # For worst point that is almost zero, we use worst_point + EPS as the reference point.
-    return np.maximum.reduce(
-        [1.1 * worst_point, 0.9 * worst_point, worst_point + EPS]
-    )
+    return np.maximum.reduce([1.1 * worst_point, 0.9 * worst_point, worst_point + EPS])
