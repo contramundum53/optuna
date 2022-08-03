@@ -54,7 +54,6 @@ _logger = logging.get_logger(__name__)
 def qei_candidates_func(
     train_x: "torch.Tensor",
     train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
     bounds: "torch.Tensor",
 ) -> "torch.Tensor":
     """Quasi MC-based batch Expected Improvement (qEI).
@@ -91,35 +90,12 @@ def qei_candidates_func(
 
     if train_obj.size(-1) != 1:
         raise ValueError("Objective may only contain single values with qEI.")
-    if train_con is not None:
-        train_y = torch.cat([train_obj, train_con], dim=-1)
 
-        is_feas = (train_con <= 0).all(dim=-1)
-        train_obj_feas = train_obj[is_feas]
+    train_y = train_obj
 
-        if train_obj_feas.numel() == 0:
-            # TODO(hvy): Do not use 0 as the best observation.
-            _logger.warning(
-                "No objective values are feasible. Using 0 as the best objective in qEI."
-            )
-            best_f = torch.zeros(())
-        else:
-            best_f = train_obj_feas.max()
+    best_f = train_obj.max()
 
-        constraints = []
-        n_constraints = train_con.size(1)
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
-        objective = ConstrainedMCObjective(
-            objective=lambda Z: Z[..., 0],
-            constraints=constraints,
-        )
-    else:
-        train_y = train_obj
-
-        best_f = train_obj.max()
-
-        objective = None  # Using the default identity objective.
+    objective = None  # Using the default identity objective.
 
     train_x = normalize(train_x, bounds=bounds)
 
@@ -150,182 +126,6 @@ def qei_candidates_func(
     candidates = unnormalize(candidates.detach(), bounds=bounds)
 
     return candidates
-
-
-@experimental_func("2.4.0")
-def qehvi_candidates_func(
-    train_x: "torch.Tensor",
-    train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
-    bounds: "torch.Tensor",
-) -> "torch.Tensor":
-    """Quasi MC-based batch Expected Hypervolume Improvement (qEHVI).
-
-    The default value of ``candidates_func`` in :class:`~optuna.integration.BoTorchSampler`
-    with multi-objective optimization when the number of objectives is three or less.
-
-    .. seealso::
-        :func:`~optuna.integration.botorch.qei_candidates_func` for argument and return value
-        descriptions.
-    """
-
-    n_objectives = train_obj.size(-1)
-
-    if train_con is not None:
-        train_y = torch.cat([train_obj, train_con], dim=-1)
-
-        is_feas = (train_con <= 0).all(dim=-1)
-        train_obj_feas = train_obj[is_feas]
-
-        constraints = []
-        n_constraints = train_con.size(1)
-
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
-        additional_qehvi_kwargs = {
-            "objective": IdentityMCMultiOutputObjective(outcomes=list(range(n_objectives))),
-            "constraints": constraints,
-        }
-    else:
-        train_y = train_obj
-
-        train_obj_feas = train_obj
-
-        additional_qehvi_kwargs = {}
-
-    train_x = normalize(train_x, bounds=bounds)
-
-    model = SingleTaskGP(train_x, train_y, outcome_transform=Standardize(m=train_y.shape[-1]))
-    mll = ExactMarginalLogLikelihood(model.likelihood, model)
-    fit_gpytorch_model(mll)
-
-    # Approximate box decomposition similar to Ax when the number of objectives is large.
-    # https://github.com/facebook/Ax/blob/master/ax/models/torch/botorch_moo_defaults
-    if n_objectives > 2:
-        alpha = 10 ** (-8 + n_objectives)
-    else:
-        alpha = 0.0
-
-    ref_point = train_obj.min(dim=0).values - 1e-8
-
-    partitioning = NondominatedPartitioning(ref_point=ref_point, Y=train_obj_feas, alpha=alpha)
-
-    ref_point_list = ref_point.tolist()
-
-    acqf = qExpectedHypervolumeImprovement(
-        model=model,
-        ref_point=ref_point_list,
-        partitioning=partitioning,
-        sampler=SobolQMCNormalSampler(num_samples=256),
-        **additional_qehvi_kwargs,
-    )
-
-    standard_bounds = torch.zeros_like(bounds)
-    standard_bounds[1] = 1
-
-    candidates, _ = optimize_acqf(
-        acq_function=acqf,
-        bounds=standard_bounds,
-        q=1,
-        num_restarts=20,
-        raw_samples=1024,
-        options={"batch_limit": 5, "maxiter": 200, "nonnegative": True},
-        sequential=True,
-    )
-
-    candidates = unnormalize(candidates.detach(), bounds=bounds)
-
-    return candidates
-
-
-@experimental_func("2.4.0")
-def qparego_candidates_func(
-    train_x: "torch.Tensor",
-    train_obj: "torch.Tensor",
-    train_con: Optional["torch.Tensor"],
-    bounds: "torch.Tensor",
-) -> "torch.Tensor":
-    """Quasi MC-based extended ParEGO (qParEGO) for constrained multi-objective optimization.
-
-    The default value of ``candidates_func`` in :class:`~optuna.integration.BoTorchSampler`
-    with multi-objective optimization when the number of objectives is larger than three.
-
-    .. seealso::
-        :func:`~optuna.integration.botorch.qei_candidates_func` for argument and return value
-        descriptions.
-    """
-
-    n_objectives = train_obj.size(-1)
-
-    weights = sample_simplex(n_objectives).squeeze()
-    scalarization = get_chebyshev_scalarization(weights=weights, Y=train_obj)
-
-    if train_con is not None:
-        train_y = torch.cat([train_obj, train_con], dim=-1)
-
-        constraints = []
-        n_constraints = train_con.size(1)
-
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
-
-        objective = ConstrainedMCObjective(
-            objective=lambda Z: scalarization(Z[..., :n_objectives]),
-            constraints=constraints,
-        )
-    else:
-        train_y = train_obj
-
-        objective = GenericMCObjective(scalarization)
-
-    train_x = normalize(train_x, bounds=bounds)
-
-    model = SingleTaskGP(train_x, train_y, outcome_transform=Standardize(m=train_y.size(-1)))
-    mll = ExactMarginalLogLikelihood(model.likelihood, model)
-    fit_gpytorch_model(mll)
-
-    acqf = qExpectedImprovement(
-        model=model,
-        best_f=objective(train_y).max(),
-        sampler=SobolQMCNormalSampler(num_samples=256),
-        objective=objective,
-    )
-
-    standard_bounds = torch.zeros_like(bounds)
-    standard_bounds[1] = 1
-
-    candidates, _ = optimize_acqf(
-        acq_function=acqf,
-        bounds=standard_bounds,
-        q=1,
-        num_restarts=20,
-        raw_samples=1024,
-        options={"batch_limit": 5, "maxiter": 200},
-        sequential=True,
-    )
-
-    candidates = unnormalize(candidates.detach(), bounds=bounds)
-
-    return candidates
-
-
-def _get_default_candidates_func(
-    n_objectives: int,
-) -> Callable[
-    [
-        "torch.Tensor",
-        "torch.Tensor",
-        Optional["torch.Tensor"],
-        "torch.Tensor",
-    ],
-    "torch.Tensor",
-]:
-    if n_objectives > 3:
-        return qparego_candidates_func
-    elif n_objectives > 1:
-        return qehvi_candidates_func
-    else:
-        return qei_candidates_func
 
 
 # TODO(hvy): Allow utilizing GPUs via some parameter, not having to rewrite the callback
@@ -370,14 +170,6 @@ class BoTorchSampler(BaseSampler):
 
             .. seealso::
                 See :func:`optuna.integration.botorch.qei_candidates_func` for an example.
-        constraints_func:
-            An optional function that computes the objective constraints. It must take a
-            :class:`~optuna.trial.FrozenTrial` and return the constraints. The return value must
-            be a sequence of :obj:`float` s. A value strictly larger than 0 means that a
-            constraint is violated. A value equal to or smaller than 0 is considered feasible.
-
-            If omitted, no constraints will be passed to ``candidates_func`` nor taken into
-            account during suggestion.
         n_startup_trials:
             Number of initial trials, that is the number of trials to resort to independent
             sampling.
@@ -391,55 +183,35 @@ class BoTorchSampler(BaseSampler):
     def __init__(
         self,
         *,
+        search_space: Dict[str, BaseDistribution],
         candidates_func: Optional[
             Callable[
                 [
                     "torch.Tensor",
                     "torch.Tensor",
-                    Optional["torch.Tensor"],
                     "torch.Tensor",
                 ],
                 "torch.Tensor",
             ]
         ] = None,
-        constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
         n_startup_trials: int = 10,
-        independent_sampler: Optional[BaseSampler] = None,
         seed: Optional[int] = None,
     ):
         _imports.check()
 
         self._candidates_func = candidates_func
-        self._constraints_func = constraints_func
-        self._independent_sampler = independent_sampler or RandomSampler(seed=seed)
+        self._independent_sampler = RandomSampler(seed=seed)
         self._n_startup_trials = n_startup_trials
         self._seed = seed
 
-        self._study_id: Optional[int] = None
-        self._search_space = IntersectionSearchSpace()
+        self._search_space = search_space
 
     def infer_relative_search_space(
         self,
         study: Study,
         trial: FrozenTrial,
     ) -> Dict[str, BaseDistribution]:
-        if self._study_id is None:
-            self._study_id = study._study_id
-        if self._study_id != study._study_id:
-            # Note that the check below is meaningless when `InMemoryStorage` is used
-            # because `InMemoryStorage.create_new_study` always returns the same study ID.
-            raise RuntimeError("BoTorchSampler cannot handle multiple studies.")
-
-        search_space: Dict[str, BaseDistribution] = OrderedDict()
-        for name, distribution in self._search_space.calculate(study, ordered_dict=True).items():
-            if distribution.single():
-                # built-in `candidates_func` cannot handle distributions that contain just a
-                # single value, so we skip them. Note that the parameter values for such
-                # distributions are sampled in `Trial`.
-                continue
-            search_space[name] = distribution
-
-        return search_space
+        return self._search_space
 
     def sample_relative(
         self,
@@ -456,7 +228,9 @@ class BoTorchSampler(BaseSampler):
 
         n_trials = len(trials)
         if n_trials < self._n_startup_trials:
-            return {}
+            return {param_name: self._independent_sampler.sample_independent(
+            study, trial, param_name, param_distribution
+        ) for param_name, param_distribution in self._search_space.items()}
 
         trans = _SearchSpaceTransform(search_space)
         n_objectives = len(study.directions)
@@ -464,7 +238,6 @@ class BoTorchSampler(BaseSampler):
             (n_trials, n_objectives), dtype=numpy.float64
         )
         params: Union[numpy.ndarray, torch.Tensor]
-        con: Optional[Union[numpy.ndarray, torch.Tensor]] = None
         bounds: Union[numpy.ndarray, torch.Tensor] = trans.bounds
         params = numpy.empty((n_trials, trans.bounds.shape[0]), dtype=numpy.float64)
         for trial_idx, trial in enumerate(trials):
@@ -477,53 +250,20 @@ class BoTorchSampler(BaseSampler):
                     value *= -1
                 values[trial_idx, obj_idx] = value
 
-            if self._constraints_func is not None:
-                constraints = study._storage.get_trial_system_attrs(trial._trial_id).get(
-                    _CONSTRAINTS_KEY
-                )
-                if constraints is not None:
-                    n_constraints = len(constraints)
-
-                    if con is None:
-                        con = numpy.full((n_trials, n_constraints), numpy.nan, dtype=numpy.float64)
-                    elif n_constraints != con.shape[1]:
-                        raise RuntimeError(
-                            f"Expected {con.shape[1]} constraints but received {n_constraints}."
-                        )
-
-                    con[trial_idx] = constraints
-
-        if self._constraints_func is not None:
-            if con is None:
-                warnings.warn(
-                    "`constraints_func` was given but no call to it correctly computed "
-                    "constraints. Constraints passed to `candidates_func` will be `None`."
-                )
-            elif numpy.isnan(con).any():
-                warnings.warn(
-                    "`constraints_func` was given but some calls to it did not correctly compute "
-                    "constraints. Constraints passed to `candidates_func` will contain NaN."
-                )
-
         values = torch.from_numpy(values)
         params = torch.from_numpy(params)
-        if con is not None:
-            con = torch.from_numpy(con)
         bounds = torch.from_numpy(bounds)
 
-        if con is not None:
-            if con.dim() == 1:
-                con.unsqueeze_(-1)
         bounds.transpose_(0, 1)
 
         if self._candidates_func is None:
-            self._candidates_func = _get_default_candidates_func(n_objectives=n_objectives)
+            self._candidates_func = qei_candidates_func
 
         with manual_seed(self._seed):
             # `manual_seed` makes the default candidates functions reproducible.
             # `SobolQMCNormalSampler`'s constructor has a `seed` argument, but its behavior is
             # deterministic when the BoTorch's seed is fixed.
-            candidates = self._candidates_func(params, values, con, bounds)
+            candidates = self._candidates_func(params, values, bounds)
             if self._seed is not None:
                 self._seed += 1
 
