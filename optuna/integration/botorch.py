@@ -228,9 +228,12 @@ class BoTorchSampler(BaseSampler):
 
         n_trials = len(trials)
         if n_trials < self._n_startup_trials:
-            return {param_name: self._independent_sampler.sample_independent(
-            study, trial, param_name, param_distribution
-        ) for param_name, param_distribution in self._search_space.items()}
+            return {
+                param_name: self._independent_sampler.sample_independent(
+                    study, trial, param_name, param_distribution
+                )
+                for param_name, param_distribution in self._search_space.items()
+            }
 
         trans = _SearchSpaceTransform(search_space)
         n_objectives = len(study.directions)
