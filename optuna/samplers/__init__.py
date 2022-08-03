@@ -9,6 +9,7 @@ from optuna.samplers._search_space import intersection_search_space
 from optuna.samplers._search_space import IntersectionSearchSpace
 from optuna.samplers._tpe.multi_objective_sampler import MOTPESampler
 from optuna.samplers._tpe.sampler import TPESampler
+from optuna.samplers._simplified_tpe.sampler import SimplifiedTPESampler
 from optuna.samplers.nsgaii._sampler import NSGAIISampler
 
 
@@ -23,6 +24,7 @@ __all__ = [
     "QMCSampler",
     "RandomSampler",
     "TPESampler",
+    "SimplifiedTPESampler"
     "intersection_search_space",
     "nsgaii",
 ]
