@@ -204,7 +204,7 @@ class BoTorchSampler(BaseSampler):
         self._n_startup_trials = n_startup_trials
         self._seed = seed
 
-        self._search_space = search_space
+        self._search_space = OrderedDict(search_space)
 
     def infer_relative_search_space(
         self,
@@ -311,6 +311,4 @@ class BoTorchSampler(BaseSampler):
         state: TrialState,
         values: Optional[Sequence[float]],
     ) -> None:
-        if self._constraints_func is not None:
-            _process_constraints_after_trial(self._constraints_func, study, trial, state)
         self._independent_sampler.after_trial(study, trial, state, values)
