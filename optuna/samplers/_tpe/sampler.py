@@ -30,6 +30,8 @@ from optuna.study import Study
 from optuna.study._study_direction import StudyDirection
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
+from optuna.distributions import CategoricalChoiceType
+from optuna.distributions import CategoricalDistribution
 
 
 EPS = 1e-12
@@ -250,6 +252,7 @@ class TPESampler(BaseSampler):
         warn_independent_sampling: bool = True,
         constant_liar: bool = False,
         constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
+        categorical_distance_funcs: Optional[Dict[str, Callable[[CategoricalChoiceType, CategoricalChoiceType], float]]] = None,
     ) -> None:
 
         self._parzen_estimator_parameters = _ParzenEstimatorParameters(
@@ -277,6 +280,8 @@ class TPESampler(BaseSampler):
         self._search_space = IntersectionSearchSpace(include_pruned=True)
         self._constant_liar = constant_liar
         self._constraints_func = constraints_func
+        self._categorical_distance_funcs = categorical_distance_funcs
+        self._categorical_distance_caches: Dict[Tuple[int, str], np.ndarray] = {}
 
         if multivariate:
             warnings.warn(
@@ -307,6 +312,13 @@ class TPESampler(BaseSampler):
         if constraints_func is not None:
             warnings.warn(
                 "The ``constraints_func`` option is an experimental feature."
+                " The interface can change in the future.",
+                ExperimentalWarning,
+            )
+        
+        if categorical_distance_funcs is not None:
+            warnings.warn(
+                "``categorical_distance_funcs`` option is an experimental feature."
                 " The interface can change in the future.",
                 ExperimentalWarning,
             )
@@ -358,6 +370,24 @@ class TPESampler(BaseSampler):
                     "if this independent sampling is intended behavior."
                 )
 
+    def _get_categorical_distances(self, trial: FrozenTrial, param: str) -> np.ndarray:
+        if param not in self._categorical_distance_funcs:
+            return None
+        if (trial._trial_id, param) in self._categorical_distance_caches:
+            return self._categorical_distance_caches[(trial._trial_id, param)]
+        dist = trial.distributions[param]
+        if isinstance(dist, CategoricalDistribution):
+            param_value = trial.params[param]
+            ret = np.array(
+                [
+                    self._categorical_distance_funcs[param](param_value, choice)
+                    for choice in dist.choices
+                ]
+            )
+        self._categorical_distance_caches[(trial._trial_id, param)] = ret
+        return ret
+
+
     def sample_relative(
         self, study: Study, trial: FrozenTrial, search_space: Dict[str, BaseDistribution]
     ) -> Dict[str, Any]:
@@ -376,6 +406,14 @@ class TPESampler(BaseSampler):
         else:
             return self._sample_relative(study, trial, search_space)
 
+    def _convert_categorical_distances(
+        self, categorical_distances: List[Dict[str, np.ndarray]], params: List[str]
+    ) -> Dict[str, np.ndarray]:
+        ret = {}
+        for param in params:
+            ret[param] = np.array([dist[param] for dist in categorical_distances])
+        return ret
+
     def _sample_relative(
         self, study: Study, trial: FrozenTrial, search_space: Dict[str, BaseDistribution]
     ) -> Dict[str, Any]:
@@ -384,11 +422,13 @@ class TPESampler(BaseSampler):
             return {}
 
         param_names = list(search_space.keys())
-        values, scores, violations = _get_observation_pairs(
+        values, scores, violations, categorical_distances = _get_observation_pairs(
             study,
             param_names,
             self._constant_liar,
             self._constraints_func is not None,
+            self._get_categorical_distances if self._categorical_distance_funcs is not None else None,
+            list(self._categorical_distance_funcs.keys()) if self._categorical_distance_funcs is not None else [],
         )
 
         # If the number of samples is insufficient, we run random trial.
@@ -407,6 +447,14 @@ class TPESampler(BaseSampler):
         param_mask_below, param_mask_above = param_mask[indices_below], param_mask[indices_above]
         below = {k: v[indices_below[param_mask_below]] for k, v in config_values.items()}
         above = {k: v[indices_above[param_mask_above]] for k, v in config_values.items()}
+        categorical_distance_arrays_below = {
+            k: np.array([v[i] for i in indices_below[param_mask_below]]) 
+            for k, v in categorical_distances.items()
+        }
+        categorical_distance_arrays_above = {
+            k: np.array([v[i] for i in indices_below[param_mask_above]]) 
+            for k, v in categorical_distances.items()
+        }
 
         # We then sample by maximizing log likelihood ratio.
         if study._is_multi_objective():
@@ -414,11 +462,23 @@ class TPESampler(BaseSampler):
                 scores, indices_below, violations
             )[param_mask_below]
             mpe_below = _ParzenEstimator(
-                below, search_space, self._parzen_estimator_parameters, weights_below
+                below, 
+                search_space, 
+                self._parzen_estimator_parameters, 
+                categorical_distance_arrays_below, 
+                weights_below
             )
         else:
-            mpe_below = _ParzenEstimator(below, search_space, self._parzen_estimator_parameters)
-        mpe_above = _ParzenEstimator(above, search_space, self._parzen_estimator_parameters)
+            mpe_below = _ParzenEstimator(
+                below, 
+                search_space, 
+                self._parzen_estimator_parameters,
+                categorical_distance_arrays_below)
+        mpe_above = _ParzenEstimator(
+            above, 
+            search_space, 
+            self._parzen_estimator_parameters,
+            categorical_distance_arrays_above)
         samples_below = mpe_below.sample(self._rng, self._n_ei_candidates)
         log_likelihoods_below = mpe_below.log_pdf(samples_below)
         log_likelihoods_above = mpe_above.log_pdf(samples_below)
@@ -437,11 +497,13 @@ class TPESampler(BaseSampler):
         param_distribution: BaseDistribution,
     ) -> Any:
 
-        values, scores, violations = _get_observation_pairs(
+        values, scores, violations, categorical_distances = _get_observation_pairs(
             study,
             [param_name],
             self._constant_liar,
             self._constraints_func is not None,
+            self._get_categorical_distances if self._categorical_distance_funcs is not None else None,
+            list(self._categorical_distance_funcs.keys()) if self._categorical_distance_funcs is not None else [],
         )
 
         n = sum(s < float("inf") for s, v in scores)  # Ignore running trials.
@@ -463,6 +525,14 @@ class TPESampler(BaseSampler):
         param_mask_below, param_mask_above = param_mask[indices_below], param_mask[indices_above]
         below = {param_name: config_value[indices_below[param_mask_below]]}
         above = {param_name: config_value[indices_above[param_mask_above]]}
+        categorical_distance_arrays_below = {
+            k: np.array([v[i] for i in indices_below[param_mask_below]]) 
+            for k, v in categorical_distances.items()
+        }
+        categorical_distance_arrays_above = {
+            k: np.array([v[i] for i in indices_above[param_mask_above]]) 
+            for k, v in categorical_distances.items()
+        }
 
         if study._is_multi_objective():
             weights_below = _calculate_weights_below_for_multi_objective(
@@ -472,14 +542,21 @@ class TPESampler(BaseSampler):
                 below,
                 {param_name: param_distribution},
                 self._parzen_estimator_parameters,
+                categorical_distance_arrays_below,
                 weights_below,
             )
         else:
             mpe_below = _ParzenEstimator(
-                below, {param_name: param_distribution}, self._parzen_estimator_parameters
+                below, 
+                {param_name: param_distribution}, 
+                self._parzen_estimator_parameters, 
+                categorical_distance_arrays_below
             )
         mpe_above = _ParzenEstimator(
-            above, {param_name: param_distribution}, self._parzen_estimator_parameters
+            above, 
+            {param_name: param_distribution}, 
+            self._parzen_estimator_parameters,
+            categorical_distance_arrays_above
         )
         samples_below = mpe_below.sample(self._rng, self._n_ei_candidates)
         log_likelihoods_below = mpe_below.log_pdf(samples_below)
@@ -589,10 +666,13 @@ def _get_observation_pairs(
     param_names: List[str],
     constant_liar: bool = False,  # TODO(hvy): Remove default value and fix unit tests.
     constraints_enabled: bool = False,
+    get_categorical_distances: Optional[Callable[[FrozenTrial, str], np.ndarray]] = None,
+    categorical_distance_params: List[str] = [],
 ) -> Tuple[
     Dict[str, List[Optional[float]]],
     List[Tuple[float, List[float]]],
     Optional[List[float]],
+    Dict[str, List[Optional[np.ndarray]]],
 ]:
     """Get observation pairs from the study.
 
@@ -632,6 +712,9 @@ def _get_observation_pairs(
     scores = []
     values: Dict[str, List[Optional[float]]] = {param_name: [] for param_name in param_names}
     violations: Optional[List[float]] = [] if constraints_enabled else None
+    categorical_distances: Dict[str, List[Optional[np.ndarray]]]
+    categorical_distances = {param_name: [] for param_name in set(param_names).intersection(categorical_distance_params) } \
+                            if get_categorical_distances is not None else {}
     for trial in study.get_trials(deepcopy=False, states=states):
         # We extract score from the trial.
         if trial.state is TrialState.COMPLETE:
@@ -687,8 +770,15 @@ def _get_observation_pairs(
             else:
                 violations.append(float("inf"))
 
-    return values, scores, violations
+        if get_categorical_distances is not None:
+            assert categorical_distances is not None
+            for param_name in categorical_distance_params:
+                if param_name in trial.params:
+                    categorical_distances[param_name].append(get_categorical_distances(trial, param_name))
+                else:
+                    categorical_distances[param_name].append(None)
 
+    return values, scores, violations, categorical_distances
 
 def _split_observation_pairs(
     loss_vals: List[Tuple[float, List[float]]],

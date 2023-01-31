@@ -16,7 +16,7 @@ from optuna.samplers._tpe.probability_distributions import _BatchedDiscreteTrunc
 from optuna.samplers._tpe.probability_distributions import _BatchedDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedTruncNormDistributions
 from optuna.samplers._tpe.probability_distributions import _MixtureOfProductDistribution
-
+from optuna.distributions import CategoricalChoiceType
 
 EPS = 1e-12
 
@@ -43,6 +43,7 @@ class _ParzenEstimator:
         observations: Dict[str, np.ndarray],
         search_space: Dict[str, BaseDistribution],
         parameters: _ParzenEstimatorParameters,
+        categorical_distances: Dict[str, np.ndarray] = {},
         predetermined_weights: Optional[np.ndarray] = None,
     ) -> None:
         if parameters.consider_prior:
@@ -75,7 +76,7 @@ class _ParzenEstimator:
             weights=weights,
             distributions=[
                 self._calculate_distributions(
-                    transformed_observations[:, i], search_space[param], parameters
+                    transformed_observations[:, i], search_space[param], parameters, categorical_distances.get(param), 
                 )
                 for i, param in enumerate(search_space)
             ],
@@ -150,10 +151,18 @@ class _ParzenEstimator:
         transformed_observations: np.ndarray,
         search_space: BaseDistribution,
         parameters: _ParzenEstimatorParameters,
+        categorical_distances: Optional[np.ndarray],
     ) -> _BatchedDistributions:
         if isinstance(search_space, CategoricalDistribution):
+            if categorical_distances is None:
+                categorical_distances = np.ones((len(transformed_observations), len(search_space.choices)))
+                categorical_distances[np.arange(len(transformed_observations)), transformed_observations.astype(int)] = 0
+            assert categorical_distances is not None
             return self._calculate_categorical_distributions(
-                transformed_observations, search_space.choices, parameters
+                transformed_observations, 
+                search_space.choices, 
+                parameters, 
+                categorical_distances
             )
         else:
             assert isinstance(search_space, (FloatDistribution, IntDistribution))
@@ -180,17 +189,18 @@ class _ParzenEstimator:
         observations: np.ndarray,
         choices: Tuple[Any, ...],
         parameters: _ParzenEstimatorParameters,
+        categorical_distances: np.ndarray,
     ) -> _BatchedDistributions:
 
         consider_prior = parameters.consider_prior or len(observations) == 0
 
         assert parameters.prior_weight is not None
-        weights = np.full(
-            shape=(len(observations) + consider_prior, len(choices)),
-            fill_value=parameters.prior_weight / (len(observations) + consider_prior),
-        )
+        weights = np.empty((len(observations) + consider_prior, len(choices)))
 
-        weights[np.arange(len(observations)), observations.astype(int)] += 1
+        distance_coeff = -np.log(parameters.prior_weight / (len(observations) + consider_prior + parameters.prior_weight))
+        weights[:len(observations), :] = np.exp(-distance_coeff * categorical_distances ** 2)
+        if consider_prior:
+            weights[-1, :] = parameters.prior_weight / (len(observations) + consider_prior)
         weights /= weights.sum(axis=1, keepdims=True)
         return _BatchedCategoricalDistributions(weights)
 

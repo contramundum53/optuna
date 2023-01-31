@@ -771,6 +771,7 @@ def test_get_observation_pairs(
         {"x": [5.0, 5.0, 5.0, 5.0]},
         scores,
         expected_violations,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(
         study, ["y"], constraints_enabled=constraints_enabled
@@ -778,6 +779,7 @@ def test_get_observation_pairs(
         {"y": [None, None, None, None]},
         scores,
         expected_violations,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(
         study, ["z"], constraints_enabled=constraints_enabled
@@ -785,6 +787,7 @@ def test_get_observation_pairs(
         {"z": [0, 0, 0, 0]},  # The internal representation of 'None' for z is 0
         scores,
         expected_violations,
+        {},
     )
 
 
@@ -839,6 +842,7 @@ def test_get_observation_pairs_multi(
             (1, [sign * 0.0]),  # PRUNED (without intermediate values)
         ],
         expected_violations,
+        {},
     )
 
 
@@ -955,7 +959,7 @@ def test_split_order(direction: str, constant_liar: bool, constraints: bool) -> 
         )
     )
 
-    values, scores, violations = _tpe.sampler._get_observation_pairs(
+    values, scores, violations, categorical_distances = _tpe.sampler._get_observation_pairs(
         study,
         ["x"],
         constant_liar,
@@ -1146,12 +1150,14 @@ def test_constant_liar_observation_pairs(direction: str) -> None:
         {"x": []},
         [],
         None,
+        {},
     )
 
     assert _tpe.sampler._get_observation_pairs(study, ["x"], constant_liar=True) == (
         {"x": [2]},
         expected_values,
         None,
+        {},
     )
 
 

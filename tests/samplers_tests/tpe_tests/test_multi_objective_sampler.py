@@ -341,21 +341,25 @@ def test_multi_objective_get_observation_pairs(
         {"x": [int_value, int_value]},
         [(-float("inf"), [objective_value, -objective_value]) for _ in range(2)],
         None,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(study, ["y"], constant_liar) == (
         {"y": [0, 0]},
         [(-float("inf"), [objective_value, -objective_value]) for _ in range(2)],
         None,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(study, ["x", "y"], constant_liar) == (
         {"x": [int_value, int_value], "y": [0, 0]},
         [(-float("inf"), [objective_value, -objective_value]) for _ in range(2)],
         None,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(study, ["z"], constant_liar) == (
         {"z": [None, None]},
         [(-float("inf"), [objective_value, -objective_value]) for _ in range(2)],
         None,
+        {},
     )
 
 
@@ -375,11 +379,13 @@ def test_multi_objective_get_observation_pairs_constrained(constraint_value: int
         {"x": [5.0, 5.0, 5.0, 5.0, 5.0]},
         [(-float("inf"), [5.0, -5.0]) for _ in range(5)],
         violations,
+        {},
     )
     assert _tpe.sampler._get_observation_pairs(study, ["y"], constraints_enabled=True) == (
         {"y": [None, None, None, None, None]},
         [(-float("inf"), [5.0, -5.0]) for _ in range(5)],
         violations,
+        {},
     )
 
 
