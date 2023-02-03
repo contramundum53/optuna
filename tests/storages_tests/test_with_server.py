@@ -95,6 +95,7 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
 
 
 def test_loaded_trials(storage: BaseStorage) -> None:
+    print("test_loaded_trials 開始")
     # Please create the tables by placing this function before the multi-process tests.
 
     N_TRIALS = 20
@@ -110,6 +111,7 @@ def test_loaded_trials(storage: BaseStorage) -> None:
     # Create a new study to confirm the study can load trial properly.
     loaded_study = optuna.load_study(study_name=_STUDY_NAME, storage=storage)
     _check_trials(loaded_study.trials)
+    print("test_loaded_trials 終了")
 
 
 @pytest.mark.parametrize(
@@ -120,15 +122,18 @@ def test_loaded_trials(storage: BaseStorage) -> None:
     ],
 )
 def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
+    print("test_store_infinite_values 開始")
     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
     trial_id = storage.create_new_trial(study_id)
     storage.set_trial_intermediate_value(trial_id, 1, input_value)
     storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
     assert storage.get_trial(trial_id).value == expected
     assert storage.get_trial(trial_id).intermediate_values[1] == expected
+    print("test_store_infinite_values 終了")
 
 
 def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
+    print("test_store_nan_intermediate_values 開始")
     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
     trial_id = storage.create_new_trial(study_id)
 
@@ -137,9 +142,11 @@ def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
 
     got_value = storage.get_trial(trial_id).intermediate_values[1]
     assert np.isnan(got_value)
+    print("test_store_nan_intermediate_values 終了")
 
 
 def test_multithread_create_study(storage: BaseStorage) -> None:
+    print("test_multithread_create_study 開始")
     with ThreadPoolExecutor(10) as pool:
         for _ in range(10):
             pool.submit(
@@ -148,9 +155,11 @@ def test_multithread_create_study(storage: BaseStorage) -> None:
                 study_name="test-multithread-create-study",
                 load_if_exists=True,
             )
+    print("test_multithread_create_study 終了")
 
 
 def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
+    print("test_multiprocess_run_optimize 開始")
     n_workers = 8
     n_trials = 20
     study_name = _STUDY_NAME
@@ -164,9 +173,11 @@ def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
     assert len(trials) == n_workers * n_trials
 
     _check_trials(trials)
+    print("test_multiprocess_run_optimize 終了")
 
 
 def test_pickle_storage(storage: BaseStorage) -> None:
+    print("test_pickle_storage 開始")
     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
     storage.set_study_system_attr(study_id, "key", "pickle")
 
@@ -175,3 +186,4 @@ def test_pickle_storage(storage: BaseStorage) -> None:
     storage_system_attrs = storage.get_study_system_attrs(study_id)
     restored_storage_system_attrs = restored_storage.get_study_system_attrs(study_id)
     assert storage_system_attrs == restored_storage_system_attrs == {"key": "pickle"}
+    print("test_pickle_storage 終了")
