@@ -1060,7 +1060,9 @@ class _VersionManager:
             context = alembic_migration.MigrationContext.configure(connection)
             with connection.begin():
                 script = self._create_alembic_script()
+                print(f"デバッグログ: start context.stamp()")
                 context.stamp(script, revision)
+                print(f"デバッグログ: finish context.stamp()")
 
     def check_table_schema_compatibility(self) -> None:
         with _create_scoped_session(self.scoped_session) as session:

@@ -96,7 +96,7 @@ jobs:
 
     - name: Tests MySQL
       run: |
-        pytest --log-cli-level=DEBUG tests/storages_tests/test_with_server.py
+        pytest -s tests/storages_tests/test_with_server.py
       env:
         SQLALCHEMY_WARN_20: 1
         OMP_NUM_THREADS: 1
