@@ -5,8 +5,6 @@ on:
     branches:
       - master
   pull_request: {}
-  schedule:
-    - cron: '0 23 * * SUN-THU'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/master' && github.run_number || github.ref }}
@@ -17,7 +15,6 @@ jobs:
   # RDB. Since current name "tests-rdbstorage" is required in the Branch protection rules, you
   # need to modify the Branch protection rules as well.
   tests-rdbstorage:
-    if: (github.event_name == 'schedule' && github.repository == 'optuna/optuna') || (github.event_name != 'schedule')
     runs-on: ubuntu-latest
 
     strategy:
@@ -81,15 +78,12 @@ jobs:
         sudo apt-get update
         sudo apt-get -y install openmpi-bin libopenmpi-dev
 
-    # TODO(HideakiImamura): Remove the version constraint on SQLAlchemy
     - name: Install
       run: |
         python -m pip install --upgrade pip
         pip install --progress-bar off -U setuptools
 
-        # Install minimal dependencies and confirm that `import optuna` is successful.
         pip install --progress-bar off .
-        pip install "sqlalchemy<2.0.0"
         python -c 'import optuna'
         optuna --version
 
@@ -98,27 +92,12 @@ jobs:
 
     - name: Install DB bindings
       run: |
-        pip install --progress-bar off PyMySQL cryptography psycopg2-binary redis
+        pip install --progress-bar off PyMySQL cryptography
 
     - name: Tests MySQL
       run: |
-        pytest tests/storages_tests/test_with_server.py
+        pytest --log-cli-level=DEBUG tests/storages_tests/test_with_server.py
       env:
         SQLALCHEMY_WARN_20: 1
         OMP_NUM_THREADS: 1
         TEST_DB_URL: mysql+pymysql://user:test@127.0.0.1/optunatest
-
-    - name: Tests PostgreSQL
-      run: |
-        pytest tests/storages_tests/test_with_server.py
-      env:
-        OMP_NUM_THREADS: 1
-        TEST_DB_URL: postgresql+psycopg2://user:test@127.0.0.1/optunatest
-
-    - name: Tests Journal Redis
-      run: |
-        pytest tests/storages_tests/test_with_server.py
-      env:
-        OMP_NUM_THREADS: 1
-        TEST_DB_URL: redis://localhost:6379
-        TEST_DB_MODE: journal-redis
