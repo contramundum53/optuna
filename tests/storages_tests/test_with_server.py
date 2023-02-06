@@ -73,8 +73,7 @@ def start_trace():
         if event == 'call':
             depth[0] += 1
             try:
-                args = "?"
-                # args = inspect.formatargvalues(*inspect.getargvalues(frame))
+                args = inspect.formatargvalues(*inspect.getargvalues(frame))
             except:
                 args = "<<<Error!>>>"
             print(pid, filename, lineno, '>' * depth[0], f_name, args)
