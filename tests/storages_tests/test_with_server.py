@@ -57,34 +57,49 @@ def storage() -> BaseStorage:
     return storage
 
 
-def run_optimize(study_name: str, storage: BaseStorage, n_trials: int) -> None:
+def start_trace():
     import sys
     import inspect
     import os
     pid = os.getpid()
+    
     def tracer(frame, event, arg, depth=[0]):
-
         filename = frame.f_code.co_filename
         lineno = frame.f_lineno
         f_name = frame.f_code.co_name
-        if f_name == '_ag':  # dirty hack for CPython 3.6+
-            return
+        # if f_name == '_ag':  # dirty hack for CPython 3.6+
+        #     return
 
         if event == 'call':
             depth[0] += 1
-            print(pid, filename, lineno, '>' * depth[0], f_name, inspect.formatargvalues(*inspect.getargvalues(frame)))
-            return tracer
+            try:
+                args = "?"
+                # args = inspect.formatargvalues(*inspect.getargvalues(frame))
+            except:
+                args = "<<<Error!>>>"
+            print(pid, filename, lineno, '>' * depth[0], f_name, args)
         elif event == 'return':
-            print(pid, filename, lineno, '<' * depth[0], f_name, arg)
+            try:
+                ret = arg.__repr__()
+            except:
+                ret = "<<<Error!>>>"
+            print(pid, filename, lineno, '<' * depth[0], f_name, ret)
             depth[0] -= 1
-        
+        return tracer
 
     sys.settrace(tracer)
-    # Create a study
-    study = optuna.load_study(study_name=study_name, storage=storage)
-    # Run optimization
-    study.optimize(objective, n_trials=n_trials)
 
+def run_optimize(study_name: str, storage: BaseStorage, n_trials: int) -> None:
+    try:
+        start_trace()
+        # Create a study
+        study = optuna.load_study(study_name=study_name, storage=storage)
+        # Run optimization
+        study.optimize(objective, n_trials=n_trials)
+    except Exception as e:
+        print("hogehoge")
+        print(e.with_traceback())
+        raise e
 
 def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
     # Check trial states.
@@ -116,6 +131,13 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
     )
 
 
+def test_tracer():
+    start_trace()
+    def fib(i):
+        if i <= 1:
+            return 1
+        return fib(i - 1) + fib(i - 2)
+    assert fib(5) == 8
 # def test_loaded_trials(storage: BaseStorage) -> None:
 #     print("test_loaded_trials 開始")
 #     # Please create the tables by placing this function before the multi-process tests.
