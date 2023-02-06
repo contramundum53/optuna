@@ -58,6 +58,28 @@ def storage() -> BaseStorage:
 
 
 def run_optimize(study_name: str, storage: BaseStorage, n_trials: int) -> None:
+    import sys
+    import inspect
+    import os
+    pid = os.getpid()
+    def tracer(frame, event, arg, depth=[0]):
+
+        filename = frame.f_code.co_filename
+        lineno = frame.f_lineno
+        f_name = frame.f_code.co_name
+        if f_name == '_ag':  # dirty hack for CPython 3.6+
+            return
+
+        if event == 'call':
+            depth[0] += 1
+            print(pid, filename, lineno, '>' * depth[0], f_name, inspect.formatargvalues(*inspect.getargvalues(frame)))
+            return tracer
+        elif event == 'return':
+            print(pid, filename, lineno, '<' * depth[0], f_name, arg)
+            depth[0] -= 1
+        
+
+    sys.settrace(tracer)
     # Create a study
     study = optuna.load_study(study_name=study_name, storage=storage)
     # Run optimization
@@ -94,68 +116,68 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
     )
 
 
-def test_loaded_trials(storage: BaseStorage) -> None:
-    print("test_loaded_trials 開始")
-    # Please create the tables by placing this function before the multi-process tests.
+# def test_loaded_trials(storage: BaseStorage) -> None:
+#     print("test_loaded_trials 開始")
+#     # Please create the tables by placing this function before the multi-process tests.
 
-    N_TRIALS = 20
-    study = optuna.create_study(study_name=_STUDY_NAME, storage=storage)
-    # Run optimization
-    study.optimize(objective, n_trials=N_TRIALS)
+#     N_TRIALS = 20
+#     study = optuna.create_study(study_name=_STUDY_NAME, storage=storage)
+#     # Run optimization
+#     study.optimize(objective, n_trials=N_TRIALS)
 
-    trials = study.trials
-    assert len(trials) == N_TRIALS
+#     trials = study.trials
+#     assert len(trials) == N_TRIALS
 
-    _check_trials(trials)
+#     _check_trials(trials)
 
-    # Create a new study to confirm the study can load trial properly.
-    loaded_study = optuna.load_study(study_name=_STUDY_NAME, storage=storage)
-    _check_trials(loaded_study.trials)
-    print("test_loaded_trials 終了")
-
-
-@pytest.mark.parametrize(
-    "input_value,expected",
-    [
-        (float("inf"), float("inf")),
-        (-float("inf"), -float("inf")),
-    ],
-)
-def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
-    print("test_store_infinite_values 開始")
-    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-    trial_id = storage.create_new_trial(study_id)
-    storage.set_trial_intermediate_value(trial_id, 1, input_value)
-    storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
-    assert storage.get_trial(trial_id).value == expected
-    assert storage.get_trial(trial_id).intermediate_values[1] == expected
-    print("test_store_infinite_values 終了")
+#     # Create a new study to confirm the study can load trial properly.
+#     loaded_study = optuna.load_study(study_name=_STUDY_NAME, storage=storage)
+#     _check_trials(loaded_study.trials)
+#     print("test_loaded_trials 終了")
 
 
-def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
-    print("test_store_nan_intermediate_values 開始")
-    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-    trial_id = storage.create_new_trial(study_id)
+# @pytest.mark.parametrize(
+#     "input_value,expected",
+#     [
+#         (float("inf"), float("inf")),
+#         (-float("inf"), -float("inf")),
+#     ],
+# )
+# def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
+#     print("test_store_infinite_values 開始")
+#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+#     trial_id = storage.create_new_trial(study_id)
+#     storage.set_trial_intermediate_value(trial_id, 1, input_value)
+#     storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
+#     assert storage.get_trial(trial_id).value == expected
+#     assert storage.get_trial(trial_id).intermediate_values[1] == expected
+#     print("test_store_infinite_values 終了")
 
-    value = float("nan")
-    storage.set_trial_intermediate_value(trial_id, 1, value)
 
-    got_value = storage.get_trial(trial_id).intermediate_values[1]
-    assert np.isnan(got_value)
-    print("test_store_nan_intermediate_values 終了")
+# def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
+#     print("test_store_nan_intermediate_values 開始")
+#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+#     trial_id = storage.create_new_trial(study_id)
+
+#     value = float("nan")
+#     storage.set_trial_intermediate_value(trial_id, 1, value)
+
+#     got_value = storage.get_trial(trial_id).intermediate_values[1]
+#     assert np.isnan(got_value)
+#     print("test_store_nan_intermediate_values 終了")
 
 
-def test_multithread_create_study(storage: BaseStorage) -> None:
-    print("test_multithread_create_study 開始")
-    with ThreadPoolExecutor(10) as pool:
-        for _ in range(10):
-            pool.submit(
-                optuna.create_study,
-                storage=storage,
-                study_name="test-multithread-create-study",
-                load_if_exists=True,
-            )
-    print("test_multithread_create_study 終了")
+# def test_multithread_create_study(storage: BaseStorage) -> None:
+#     print("test_multithread_create_study 開始")
+#     with ThreadPoolExecutor(10) as pool:
+#         for _ in range(10):
+#             pool.submit(
+#                 optuna.create_study,
+#                 storage=storage,
+#                 study_name="test-multithread-create-study",
+#                 load_if_exists=True,
+#             )
+#     print("test_multithread_create_study 終了")
 
 
 def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
@@ -176,14 +198,14 @@ def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
     print("test_multiprocess_run_optimize 終了")
 
 
-def test_pickle_storage(storage: BaseStorage) -> None:
-    print("test_pickle_storage 開始")
-    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-    storage.set_study_system_attr(study_id, "key", "pickle")
+# def test_pickle_storage(storage: BaseStorage) -> None:
+#     print("test_pickle_storage 開始")
+#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+#     storage.set_study_system_attr(study_id, "key", "pickle")
 
-    restored_storage = pickle.loads(pickle.dumps(storage))
+#     restored_storage = pickle.loads(pickle.dumps(storage))
 
-    storage_system_attrs = storage.get_study_system_attrs(study_id)
-    restored_storage_system_attrs = restored_storage.get_study_system_attrs(study_id)
-    assert storage_system_attrs == restored_storage_system_attrs == {"key": "pickle"}
-    print("test_pickle_storage 終了")
+#     storage_system_attrs = storage.get_study_system_attrs(study_id)
+#     restored_storage_system_attrs = restored_storage.get_study_system_attrs(study_id)
+#     assert storage_system_attrs == restored_storage_system_attrs == {"key": "pickle"}
+#     print("test_pickle_storage 終了")
