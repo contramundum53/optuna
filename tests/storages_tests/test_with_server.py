@@ -223,17 +223,17 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
 #     print("test_store_nan_intermediate_values 終了")
 
 
-# def test_multithread_create_study(storage: BaseStorage) -> None:
-#     print("test_multithread_create_study 開始")
-#     with ThreadPoolExecutor(10) as pool:
-#         for _ in range(10):
-#             pool.submit(
-#                 optuna.create_study,
-#                 storage=storage,
-#                 study_name="test-multithread-create-study",
-#                 load_if_exists=True,
-#             )
-#     print("test_multithread_create_study 終了")
+def test_multithread_create_study(storage: BaseStorage) -> None:
+    print("test_multithread_create_study 開始")
+    with ThreadPoolExecutor(10) as pool:
+        for _ in range(10):
+            pool.submit(
+                optuna.create_study,
+                storage=storage,
+                study_name="test-multithread-create-study",
+                load_if_exists=True,
+            )
+    print("test_multithread_create_study 終了")
 
 
 def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
