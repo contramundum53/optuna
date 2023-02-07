@@ -11,6 +11,7 @@ import optuna
 from optuna.storages import BaseStorage
 from optuna.study import StudyDirection
 from optuna.trial import TrialState
+from sqlalchemy.pool import NullPool
 
 
 _STUDY_NAME = "_test_multiprocess"
@@ -37,7 +38,7 @@ def get_storage() -> BaseStorage:
 
     storage: BaseStorage
     if storage_mode == "":
-        storage = optuna.storages.RDBStorage(url=storage_url)
+        storage = optuna.storages.RDBStorage(url=storage_url, engine_kwargs={"poolclass": NullPool})
     elif storage_mode == "journal-redis":
         journal_redis_storage = optuna.storages.JournalRedisStorage(storage_url)
         storage = optuna.storages.JournalStorage(journal_redis_storage)
@@ -192,35 +193,35 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
 #     print("test_loaded_trials 終了")
 
 
-# @pytest.mark.parametrize(
-#     "input_value,expected",
-#     [
-#         (float("inf"), float("inf")),
-#         (-float("inf"), -float("inf")),
-#     ],
-# )
-# def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
-#     print("test_store_infinite_values 開始")
-#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-#     trial_id = storage.create_new_trial(study_id)
-#     storage.set_trial_intermediate_value(trial_id, 1, input_value)
-#     storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
-#     assert storage.get_trial(trial_id).value == expected
-#     assert storage.get_trial(trial_id).intermediate_values[1] == expected
-#     print("test_store_infinite_values 終了")
+@pytest.mark.parametrize(
+    "input_value,expected",
+    [
+        (float("inf"), float("inf")),
+        (-float("inf"), -float("inf")),
+    ],
+)
+def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
+    print("test_store_infinite_values 開始")
+    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+    trial_id = storage.create_new_trial(study_id)
+    storage.set_trial_intermediate_value(trial_id, 1, input_value)
+    storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
+    assert storage.get_trial(trial_id).value == expected
+    assert storage.get_trial(trial_id).intermediate_values[1] == expected
+    print("test_store_infinite_values 終了")
 
 
-# def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
-#     print("test_store_nan_intermediate_values 開始")
-#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-#     trial_id = storage.create_new_trial(study_id)
+def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
+    print("test_store_nan_intermediate_values 開始")
+    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+    trial_id = storage.create_new_trial(study_id)
 
-#     value = float("nan")
-#     storage.set_trial_intermediate_value(trial_id, 1, value)
+    value = float("nan")
+    storage.set_trial_intermediate_value(trial_id, 1, value)
 
-#     got_value = storage.get_trial(trial_id).intermediate_values[1]
-#     assert np.isnan(got_value)
-#     print("test_store_nan_intermediate_values 終了")
+    got_value = storage.get_trial(trial_id).intermediate_values[1]
+    assert np.isnan(got_value)
+    print("test_store_nan_intermediate_values 終了")
 
 
 def test_multithread_create_study(storage: BaseStorage) -> None:
