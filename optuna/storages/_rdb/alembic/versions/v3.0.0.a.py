@@ -8,6 +8,7 @@ Create Date: 2021-11-21 23:48:42.424430
 from typing import Any
 from typing import List
 
+import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import Column
 from sqlalchemy import DateTime
@@ -19,9 +20,7 @@ from sqlalchemy import orm
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy import UniqueConstraint
-from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.declarative import declarative_base
 
 from optuna.distributions import _convert_old_distribution_to_new_distribution
 from optuna.distributions import BaseDistribution
@@ -35,6 +34,12 @@ from optuna.distributions import json_to_distribution
 from optuna.distributions import LogUniformDistribution
 from optuna.distributions import UniformDistribution
 from optuna.trial import TrialState
+
+try:
+    from sqlalchemy.orm import declarative_base
+except ImportError:
+    # TODO(c-bata): Remove this after dropping support for SQLAlchemy v1.3 or prior.
+    from sqlalchemy.ext.declarative import declarative_base
 
 
 # revision identifiers, used by Alembic.
@@ -139,7 +144,7 @@ def persist(session: orm.Session, distributions: List[BaseDistribution]) -> None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = Inspector.from_engine(bind)
+    inspector = sa.inspect(bind)
     tables = inspector.get_table_names()
 
     assert "trial_params" in tables
@@ -168,7 +173,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    inspector = Inspector.from_engine(bind)
+    inspector = sa.inspect(bind)
     tables = inspector.get_table_names()
 
     assert "trial_params" in tables

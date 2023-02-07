@@ -14,7 +14,6 @@ from optuna.trial._state import TrialState
 def _get_best_intermediate_result_over_steps(
     trial: "optuna.trial.FrozenTrial", direction: StudyDirection
 ) -> float:
-
     values = np.asarray(list(trial.intermediate_values.values()), dtype=float)
     if direction == StudyDirection.MAXIMIZE:
         return np.nanmax(values)
@@ -22,15 +21,12 @@ def _get_best_intermediate_result_over_steps(
 
 
 def _get_percentile_intermediate_result_over_trials(
-    all_trials: List["optuna.trial.FrozenTrial"],
+    completed_trials: List["optuna.trial.FrozenTrial"],
     direction: StudyDirection,
     step: int,
     percentile: float,
     n_min_trials: int,
 ) -> float:
-
-    completed_trials = [t for t in all_trials if t.state == TrialState.COMPLETE]
-
     if len(completed_trials) == 0:
         raise ValueError("No trials have been completed.")
 
@@ -55,7 +51,6 @@ def _get_percentile_intermediate_result_over_trials(
 def _is_first_in_interval_step(
     step: int, intermediate_steps: KeysView[int], n_warmup_steps: int, interval_steps: int
 ) -> bool:
-
     nearest_lower_pruning_step = (
         step - n_warmup_steps
     ) // interval_steps * interval_steps + n_warmup_steps
@@ -146,7 +141,6 @@ class PercentilePruner(BasePruner):
         *,
         n_min_trials: int = 1,
     ) -> None:
-
         if not 0.0 <= percentile <= 100:
             raise ValueError(
                 "Percentile must be between 0 and 100 inclusive but got {}.".format(percentile)
@@ -175,9 +169,8 @@ class PercentilePruner(BasePruner):
         self._n_min_trials = n_min_trials
 
     def prune(self, study: "optuna.study.Study", trial: "optuna.trial.FrozenTrial") -> bool:
-
-        all_trials = study.get_trials(deepcopy=False)
-        n_trials = len([t for t in all_trials if t.state == TrialState.COMPLETE])
+        completed_trials = study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
+        n_trials = len(completed_trials)
 
         if n_trials == 0:
             return False
@@ -204,7 +197,7 @@ class PercentilePruner(BasePruner):
             return True
 
         p = _get_percentile_intermediate_result_over_trials(
-            all_trials, direction, step, self._percentile, self._n_min_trials
+            completed_trials, direction, step, self._percentile, self._n_min_trials
         )
         if math.isnan(p):
             return False

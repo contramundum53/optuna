@@ -7,7 +7,7 @@ from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
 from optuna.samplers._search_space import _GroupDecomposedSearchSpace
 from optuna.samplers._search_space.group_decomposed import _SearchSpaceGroup
-from optuna.testing.storage import StorageSupplier
+from optuna.testing.storages import StorageSupplier
 from optuna.trial import Trial
 
 
@@ -184,7 +184,6 @@ def test_group_decomposed_search_space() -> None:
     # Failed or pruned trials are not considered in the calculation of
     # an intersection search space.
     def objective(trial: Trial, exception: Exception) -> float:
-
         trial.suggest_float("a", 0, 1)
         raise exception
 

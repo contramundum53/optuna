@@ -3,21 +3,12 @@ from typing import Dict
 from typing import NamedTuple
 from typing import Optional
 from typing import Tuple
-from typing import TYPE_CHECKING
 
 import numpy as np
 
 from optuna import distributions
-from optuna._imports import _LazyImport
 from optuna.distributions import BaseDistribution
-
-
-if TYPE_CHECKING:
-    import scipy.special as special
-    import scipy.stats as stats
-else:
-    special = _LazyImport("scipy.special")
-    stats = _LazyImport("scipy.stats")
+from optuna.samplers._tpe import _truncnorm as truncnorm
 
 
 EPS = 1e-12
@@ -54,7 +45,6 @@ class _ParzenEstimator:
         parameters: _ParzenEstimatorParameters,
         predetermined_weights: Optional[np.ndarray] = None,
     ) -> None:
-
         self._search_space = search_space
         self._parameters = parameters
         self._n_observations = next(iter(observations.values())).size
@@ -99,12 +89,10 @@ class _ParzenEstimator:
             self._categorical_weights[param_name] = categorical_weights
 
     def sample(self, rng: np.random.RandomState, size: int) -> Dict[str, np.ndarray]:
-
         samples_dict = {}
         active = rng.choice(len(self._weights), size, p=self._weights)
 
         for param_name, dist in self._search_space.items():
-
             if isinstance(dist, distributions.CategoricalDistribution):
                 categorical_weights = self._categorical_weights[param_name]
                 assert categorical_weights is not None
@@ -125,26 +113,19 @@ class _ParzenEstimator:
                 # We sample from truncnorm.
                 trunc_low = (low - mus[active]) / sigmas[active]
                 trunc_high = (high - mus[active]) / sigmas[active]
-                samples = np.full((), fill_value=high + 1.0, dtype=np.float64)
-                while (samples >= high).any():
-                    samples = np.where(
-                        samples < high,
-                        samples,
-                        stats.truncnorm.rvs(
-                            trunc_low,
-                            trunc_high,
-                            size=size,
-                            loc=mus[active],
-                            scale=sigmas[active],
-                            random_state=rng,
-                        ),
-                    )
+                samples = truncnorm.rvs(
+                    trunc_low,
+                    trunc_high,
+                    size=size,
+                    loc=mus[active],
+                    scale=sigmas[active],
+                    random_state=rng,
+                )
             samples_dict[param_name] = samples
         samples_dict = self._transform_from_uniform(samples_dict)
         return samples_dict
 
     def log_pdf(self, samples_dict: Dict[str, np.ndarray]) -> np.ndarray:
-
         samples_dict = self._transform_to_uniform(samples_dict)
         n_observations = len(self._weights)
         n_samples = next(iter(samples_dict.values())).size
@@ -184,27 +165,31 @@ class _ParzenEstimator:
                 assert mus is not None
                 assert sigmas is not None
 
-                cdf_func = _ParzenEstimator._normal_cdf
-                p_accept = cdf_func(high, mus, sigmas) - cdf_func(low, mus, sigmas)
                 if q is None:
-                    distance = samples[:, None] - mus
-                    mahalanobis = distance / np.maximum(sigmas, EPS)
-                    z = np.sqrt(2 * np.pi) * sigmas
-                    coefficient = 1 / z / p_accept
-                    log_pdf = -0.5 * mahalanobis**2 + np.log(coefficient)
+                    log_pdf = truncnorm.logpdf(
+                        samples[:, None],
+                        (low - mus) / sigmas,
+                        (high - mus) / sigmas,
+                        loc=mus,
+                        scale=sigmas,
+                    )
                 else:
                     upper_bound = np.minimum(samples + q / 2.0, high)
                     lower_bound = np.maximum(samples - q / 2.0, low)
-                    cdf = cdf_func(upper_bound[:, None], mus[None], sigmas[None]) - cdf_func(
-                        lower_bound[:, None], mus[None], sigmas[None]
+                    log_gauss_mass = truncnorm._log_gauss_mass(
+                        (lower_bound[:, None] - mus) / sigmas,
+                        (upper_bound[:, None] - mus) / sigmas,
                     )
-                    log_pdf = np.log(cdf + EPS) - np.log(p_accept + EPS)
+                    log_p_accept = truncnorm._log_gauss_mass(
+                        (low - mus) / sigmas, (high - mus) / sigmas
+                    )
+                    log_pdf = log_gauss_mass - log_p_accept
             component_log_pdf += log_pdf
-        ret = special.logsumexp(component_log_pdf + np.log(self._weights), axis=1)
-        return ret
+        weighted_log_pdf = component_log_pdf + np.log(self._weights)
+        max_ = weighted_log_pdf.max(axis=1)
+        return np.log(np.exp(weighted_log_pdf - max_[:, np.newaxis]).sum(axis=1)) + max_
 
     def _calculate_weights(self, predetermined_weights: Optional[np.ndarray]) -> np.ndarray:
-
         # We decide the weights.
         consider_prior = self._parameters.consider_prior
         prior_weight = self._parameters.prior_weight
@@ -216,6 +201,22 @@ class _ParzenEstimator:
 
         if predetermined_weights is None:
             w = weights_func(n_observations)[:n_observations]
+            if w is not None:
+                if np.any(w < 0):
+                    raise ValueError(
+                        f"The `weights` function is not allowed to return negative values {w}. "
+                        + f"The argument of the `weights` function is {n_observations}."
+                    )
+                if len(w) > 0 and np.sum(w) <= 0:
+                    raise ValueError(
+                        f"The `weight` function is not allowed to return all-zero values {w}."
+                        + f" The argument of the `weights` function is {n_observations}."
+                    )
+                if not np.all(np.isfinite(w)):
+                    raise ValueError(
+                        "The `weights`function is not allowed to return infinite or NaN values "
+                        + f"{w}. The argument of the `weights` function is {n_observations}."
+                    )
         else:
             w = predetermined_weights[:n_observations]
 
@@ -233,7 +234,6 @@ class _ParzenEstimator:
     def _calculate_parzen_bounds(
         self, distribution: BaseDistribution
     ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-
         # We calculate low and high.
         if isinstance(distribution, distributions.FloatDistribution):
             if distribution.log:
@@ -275,7 +275,6 @@ class _ParzenEstimator:
         return low, high, q
 
     def _transform_to_uniform(self, samples_dict: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-
         transformed = {}
         for param_name, samples in samples_dict.items():
             distribution = self._search_space[param_name]
@@ -294,7 +293,6 @@ class _ParzenEstimator:
     def _transform_from_uniform(
         self, samples_dict: Dict[str, np.ndarray]
     ) -> Dict[str, np.ndarray]:
-
         transformed = {}
         for param_name, samples in samples_dict.items():
             distribution = self._search_space[param_name]
@@ -331,7 +329,6 @@ class _ParzenEstimator:
         return transformed
 
     def _precompute_sigmas0(self, observations: Dict[str, np.ndarray]) -> Optional[float]:
-
         n_observations = next(iter(observations.values())).size
         n_observations = max(n_observations, 1)
         n_params = len(observations)
@@ -348,7 +345,6 @@ class _ParzenEstimator:
     def _calculate_categorical_params(
         self, observations: np.ndarray, param_name: str
     ) -> np.ndarray:
-
         # TODO(kstoneriv3): This the bandwidth selection rule might not be optimal.
         observations = observations.astype(int)
         n_observations = self._n_observations
@@ -377,7 +373,6 @@ class _ParzenEstimator:
     def _calculate_numerical_params(
         self, observations: np.ndarray, param_name: str
     ) -> Tuple[np.ndarray, np.ndarray]:
-
         n_observations = self._n_observations
         consider_prior = self._parameters.consider_prior
         consider_endpoints = self._parameters.consider_endpoints
@@ -442,19 +437,9 @@ class _ParzenEstimator:
         return mus, sigmas
 
     @staticmethod
-    def _normal_cdf(x: np.ndarray, mu: np.ndarray, sigma: np.ndarray) -> np.ndarray:
-
-        mu, sigma = map(np.asarray, (mu, sigma))
-        denominator = x - mu
-        numerator = np.maximum(np.sqrt(2) * sigma, EPS)
-        z = denominator / numerator
-        return 0.5 * (1 + special.erf(z))
-
-    @staticmethod
     def _sample_from_categorical_dist(
         rng: np.random.RandomState, probabilities: np.ndarray
     ) -> np.ndarray:
-
         n_samples = probabilities.shape[0]
         rnd_quantile = rng.rand(n_samples)
         cum_probs = np.cumsum(probabilities, axis=1)

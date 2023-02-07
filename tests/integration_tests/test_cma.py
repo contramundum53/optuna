@@ -5,20 +5,27 @@ from unittest.mock import call
 from unittest.mock import patch
 import warnings
 
-import cma
+import _pytest.capture
 import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.distributions import BaseDistribution
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
 from optuna.integration.cma import _Optimizer
 from optuna.study._study_direction import StudyDirection
-from optuna.testing.distribution import UnsupportedDistribution
-from optuna.testing.sampler import DeterministicRelativeSampler
+from optuna.testing.distributions import UnsupportedDistribution
 from optuna.trial import FrozenTrial
+from optuna.trial import Trial
 from optuna.trial import TrialState
+
+
+with try_import():
+    import cma
+
+pytestmark = pytest.mark.integration
 
 
 def test_cmaes_deprecation_warning() -> None:
@@ -29,14 +36,12 @@ def test_cmaes_deprecation_warning() -> None:
 class TestPyCmaSampler:
     @staticmethod
     def test_init_cma_opts() -> None:
-
         sampler = optuna.integration.PyCmaSampler(
             x0={"x": 0, "y": 0},
             sigma0=0.1,
             cma_stds={"x": 1, "y": 1},
             seed=1,
             cma_opts={"popsize": 5},
-            independent_sampler=DeterministicRelativeSampler({}, {}),
         )
         study = optuna.create_study(sampler=sampler)
 
@@ -58,7 +63,6 @@ class TestPyCmaSampler:
 
     @staticmethod
     def test_init_default_values() -> None:
-
         sampler = optuna.integration.PyCmaSampler()
         seed = sampler._cma_opts.get("seed")
         assert isinstance(seed, int)
@@ -67,8 +71,30 @@ class TestPyCmaSampler:
         assert isinstance(sampler._independent_sampler, optuna.samplers.RandomSampler)
 
     @staticmethod
-    def test_infer_relative_search_space_1d() -> None:
+    def test_warn_independent_sampling(capsys: _pytest.capture.CaptureFixture) -> None:
+        def objective(trial: Trial) -> float:
+            x = trial.suggest_categorical("x", ["a", "b"])
+            if x == "a":
+                return trial.suggest_float("y", 0, 1)
+            else:
+                return trial.suggest_float("z", 0, 1)
 
+        # We need to reconstruct our default handler to properly capture stderr.
+        optuna.logging._reset_library_root_logger()
+        optuna.logging.enable_default_handler()
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+        sampler = optuna.integration.PyCmaSampler(
+            warn_independent_sampling=True, n_startup_trials=0
+        )
+        study = optuna.create_study(sampler=sampler)
+        study.optimize(objective, n_trials=10)
+
+        _, err = capsys.readouterr()
+        assert err
+
+    @staticmethod
+    def test_infer_relative_search_space_1d() -> None:
         sampler = optuna.integration.PyCmaSampler()
         study = optuna.create_study(sampler=sampler)
 
@@ -78,8 +104,7 @@ class TestPyCmaSampler:
 
     @staticmethod
     def test_sample_relative_1d() -> None:
-
-        independent_sampler = DeterministicRelativeSampler({}, {})
+        independent_sampler = optuna.samplers.RandomSampler()
         sampler = optuna.integration.PyCmaSampler(independent_sampler=independent_sampler)
         study = optuna.create_study(sampler=sampler)
 
@@ -92,8 +117,7 @@ class TestPyCmaSampler:
 
     @staticmethod
     def test_sample_relative_n_startup_trials() -> None:
-
-        independent_sampler = DeterministicRelativeSampler({}, {})
+        independent_sampler = optuna.samplers.RandomSampler()
         sampler = optuna.integration.PyCmaSampler(
             n_startup_trials=2, independent_sampler=independent_sampler
         )
@@ -114,13 +138,11 @@ class TestPyCmaSampler:
 
     @staticmethod
     def test_initialize_x0_with_unsupported_distribution() -> None:
-
         with pytest.raises(NotImplementedError):
             optuna.integration.PyCmaSampler._initialize_x0({"x": UnsupportedDistribution()})
 
     @staticmethod
     def test_initialize_sigma0_with_unsupported_distribution() -> None:
-
         with pytest.raises(NotImplementedError):
             optuna.integration.PyCmaSampler._initialize_sigma0({"x": UnsupportedDistribution()})
 
@@ -142,7 +164,6 @@ class TestOptimizer:
     @staticmethod
     @pytest.fixture
     def search_space() -> Dict[str, BaseDistribution]:
-
         return {
             "c": CategoricalDistribution(("a", "b")),
             "d": FloatDistribution(-1, 9, step=2),
@@ -156,7 +177,6 @@ class TestOptimizer:
     @staticmethod
     @pytest.fixture
     def x0() -> Dict[str, Any]:
-
         return {
             "c": "a",
             "d": -1,
@@ -169,7 +189,6 @@ class TestOptimizer:
 
     @staticmethod
     def test_init(search_space: Dict[str, BaseDistribution], x0: Dict[str, Any]) -> None:
-
         # TODO(c-bata): Avoid exact assertion checks
         eps = 1e-10
 
@@ -193,7 +212,6 @@ class TestOptimizer:
 
     @staticmethod
     def test_init_with_unsupported_distribution() -> None:
-
         with pytest.raises(NotImplementedError):
             optuna.integration.cma._Optimizer(
                 {"x": UnsupportedDistribution()}, {"x": 0}, 0.2, None, {}
@@ -204,7 +222,6 @@ class TestOptimizer:
     def test_tell(
         search_space: Dict[str, BaseDistribution], x0: Dict[str, Any], direction: StudyDirection
     ) -> None:
-
         optimizer = optuna.integration.cma._Optimizer(
             search_space, x0, 0.2, None, {"popsize": 3, "seed": 1}
         )
@@ -220,7 +237,6 @@ class TestOptimizer:
     def test_tell_filter_by_state(
         search_space: Dict[str, BaseDistribution], x0: Dict[str, Any], state: TrialState
     ) -> None:
-
         optimizer = optuna.integration.cma._Optimizer(
             search_space, x0, 0.2, None, {"popsize": 2, "seed": 1}
         )
@@ -233,7 +249,6 @@ class TestOptimizer:
     def test_tell_filter_by_distribution(
         search_space: Dict[str, BaseDistribution], x0: Dict[str, Any]
     ) -> None:
-
         optimizer = optuna.integration.cma._Optimizer(
             search_space, x0, 0.2, None, {"popsize": 2, "seed": 1}
         )
@@ -246,7 +261,6 @@ class TestOptimizer:
 
     @staticmethod
     def test_ask(search_space: Dict[str, BaseDistribution], x0: Dict[str, Any]) -> None:
-
         trials = [_create_frozen_trial(x0, search_space, number=i) for i in range(3)]
 
         # Create 0-th individual.
@@ -285,7 +299,6 @@ class TestOptimizer:
 
     @staticmethod
     def test_is_compatible(search_space: Dict[str, BaseDistribution], x0: Dict[str, Any]) -> None:
-
         optimizer = optuna.integration.cma._Optimizer(search_space, x0, 0.1, None, {})
 
         # Compatible.
@@ -328,7 +341,6 @@ def _create_frozen_trial(
     state: TrialState = TrialState.COMPLETE,
     number: int = 0,
 ) -> FrozenTrial:
-
     return FrozenTrial(
         number=number,
         value=1.0,

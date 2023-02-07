@@ -59,35 +59,35 @@ class IntersectionSearchSpace:
             if self._study_id != study._study_id:
                 raise ValueError("`IntersectionSearchSpace` cannot handle multiple studies.")
 
-        states_of_interest = [optuna.trial.TrialState.COMPLETE]
+        states_of_interest = [
+            optuna.trial.TrialState.COMPLETE,
+            optuna.trial.TrialState.WAITING,
+            optuna.trial.TrialState.RUNNING,
+        ]
 
         if self._include_pruned:
             states_of_interest.append(optuna.trial.TrialState.PRUNED)
 
-        next_cursor = self._cursor
-        for trial in reversed(study.get_trials(deepcopy=False)):
+        trials = study.get_trials(deepcopy=False, states=states_of_interest)
+
+        next_cursor = trials[-1].number + 1 if len(trials) > 0 else -1
+        for trial in reversed(trials):
             if self._cursor > trial.number:
                 break
 
             if not trial.state.is_finished():
                 next_cursor = trial.number
-
-            if trial.state not in states_of_interest:
                 continue
 
             if self._search_space is None:
                 self._search_space = copy.copy(trial.distributions)
                 continue
 
-            delete_list = []
-            for param_name, param_distribution in self._search_space.items():
-                if param_name not in trial.distributions:
-                    delete_list.append(param_name)
-                elif trial.distributions[param_name] != param_distribution:
-                    delete_list.append(param_name)
-
-            for param_name in delete_list:
-                del self._search_space[param_name]
+            self._search_space = {
+                name: distribution
+                for name, distribution in self._search_space.items()
+                if trial.distributions.get(name) == distribution
+            }
 
         self._cursor = next_cursor
         search_space = self._search_space or {}

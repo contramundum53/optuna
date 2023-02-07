@@ -1,22 +1,33 @@
 import datetime
-import itertools
 import os
 from typing import Optional
 
 import pytest
-import torch
-import torch.distributed as dist
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration import TorchDistributedTrial
-from optuna.testing.pruner import DeterministicPruner
-from optuna.testing.storage import STORAGE_MODES
-from optuna.testing.storage import StorageSupplier
+from optuna.testing.pruners import DeterministicPruner
+from optuna.testing.storages import StorageSupplier
+
+
+with try_import():
+    import torch
+    import torch.distributed as dist
+
+pytestmark = pytest.mark.integration
+
+STORAGE_MODES = [
+    "inmemory",
+    "sqlite",
+    "cached_sqlite",
+    "journal",
+    "journal_redis",
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
 def init_process_group() -> None:
-
     if "OMPI_COMM_WORLD_SIZE" not in os.environ:
         pytest.skip("This test is expected to be launch with mpirun.")
 
@@ -26,12 +37,12 @@ def init_process_group() -> None:
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "20000"
 
-    dist.init_process_group("gloo", timeout=datetime.timedelta(seconds=15))
+    dist.init_process_group("gloo", timeout=datetime.timedelta(seconds=15))  # type: ignore
 
 
 def test_torch_distributed_trial_experimental_warning() -> None:
     with pytest.warns(optuna.exceptions.ExperimentalWarning):
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study()
             TorchDistributedTrial(study.ask())
         else:
@@ -41,7 +52,7 @@ def test_torch_distributed_trial_experimental_warning() -> None:
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
 def test_torch_distributed_trial_invalid_argument() -> None:
     with pytest.raises(ValueError):
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             TorchDistributedTrial(None)
         else:
             study = optuna.create_study()
@@ -52,7 +63,7 @@ def test_torch_distributed_trial_invalid_argument() -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_float(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -66,10 +77,11 @@ def test_suggest_float(storage_mode: str) -> None:
 
 
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
+@pytest.mark.filterwarnings("ignore::FutureWarning")
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_uniform(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -83,10 +95,11 @@ def test_suggest_uniform(storage_mode: str) -> None:
 
 
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
+@pytest.mark.filterwarnings("ignore::FutureWarning")
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_loguniform(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -100,10 +113,11 @@ def test_suggest_loguniform(storage_mode: str) -> None:
 
 
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
+@pytest.mark.filterwarnings("ignore::FutureWarning")
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_discrete_uniform(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -121,7 +135,7 @@ def test_suggest_discrete_uniform(storage_mode: str) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_int(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -138,7 +152,7 @@ def test_suggest_int(storage_mode: str) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_suggest_categorical(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -156,7 +170,7 @@ def test_suggest_categorical(storage_mode: str) -> None:
 def test_report(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
         study: Optional[optuna.study.Study] = None
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -164,7 +178,7 @@ def test_report(storage_mode: str) -> None:
 
         trial.report(1, 0)
 
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             assert study is not None
             study.trials[0].intermediate_values[0] == 1
 
@@ -174,7 +188,7 @@ def test_report(storage_mode: str) -> None:
 def test_report_nan(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
         study: Optional[optuna.study.Study] = None
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -183,18 +197,17 @@ def test_report_nan(storage_mode: str) -> None:
         with pytest.raises(TypeError):
             trial.report("abc", 0)  # type: ignore
 
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             assert study is not None
             assert len(study.trials[0].intermediate_values) == 0
 
 
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
-@pytest.mark.parametrize(
-    "storage_mode, is_pruning", itertools.product(STORAGE_MODES, [False, True])
-)
+@pytest.mark.parametrize("storage_mode", STORAGE_MODES)
+@pytest.mark.parametrize("is_pruning", [False, True])
 def test_should_prune(storage_mode: str, is_pruning: bool) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage, pruner=DeterministicPruner(is_pruning))
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -208,7 +221,7 @@ def test_should_prune(storage_mode: str, is_pruning: bool) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_user_attrs(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -224,7 +237,7 @@ def test_user_attrs(storage_mode: str) -> None:
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
 def test_user_attrs_with_exception() -> None:
     with StorageSupplier("sqlite") as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -236,39 +249,9 @@ def test_user_attrs_with_exception() -> None:
 
 @pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
-def test_system_attrs(storage_mode: str) -> None:
-    with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
-            study = optuna.create_study(storage=storage)
-            trial = TorchDistributedTrial(study.ask())
-        else:
-            trial = TorchDistributedTrial(None)
-
-        trial.set_system_attr("dataset", "mnist")
-        trial.set_system_attr("batch_size", 128)
-
-        assert trial.system_attrs["dataset"] == "mnist"
-        assert trial.system_attrs["batch_size"] == 128
-
-
-@pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
-def test_system_attrs_with_exception() -> None:
-    with StorageSupplier("sqlite") as storage:
-        if dist.get_rank() == 0:
-            study = optuna.create_study(storage=storage)
-            trial = TorchDistributedTrial(study.ask())
-        else:
-            trial = TorchDistributedTrial(None)
-
-        with pytest.raises(TypeError):
-            trial.set_system_attr("not serializable", torch.Tensor([1, 2]))
-
-
-@pytest.mark.filterwarnings("ignore::optuna.exceptions.ExperimentalWarning")
-@pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_number(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -281,7 +264,7 @@ def test_number(storage_mode: str) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_datetime_start(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -294,7 +277,7 @@ def test_datetime_start(storage_mode: str) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_params(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -314,7 +297,7 @@ def test_params(storage_mode: str) -> None:
 @pytest.mark.parametrize("storage_mode", STORAGE_MODES)
 def test_distributions(storage_mode: str) -> None:
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -341,7 +324,7 @@ def test_distributions(storage_mode: str) -> None:
 def test_updates_properties(storage_mode: str) -> None:
     """Check for any distributed deadlock following a property read."""
     with StorageSupplier(storage_mode) as storage:
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             study = optuna.create_study(storage=storage)
             trial = TorchDistributedTrial(study.ask())
         else:
@@ -358,13 +341,13 @@ def test_updates_properties(storage_mode: str) -> None:
         ]
 
         # Rank 0 can read properties without deadlock.
-        if dist.get_rank() == 0:
+        if dist.get_rank() == 0:  # type: ignore
             [getattr(trial, p) for p in property_names]
 
-        dist.barrier()
+        dist.barrier()  # type: ignore
 
         # Same with rank 1.
-        if dist.get_rank() == 1:
+        if dist.get_rank() == 1:  # type: ignore
             [getattr(trial, p) for p in property_names]
 
-        dist.barrier()
+        dist.barrier()  # type: ignore

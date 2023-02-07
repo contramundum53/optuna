@@ -1,16 +1,26 @@
 import logging
-from logging import CRITICAL  # NOQA
-from logging import DEBUG  # NOQA
-from logging import ERROR  # NOQA
-from logging import FATAL  # NOQA
-from logging import INFO  # NOQA
-from logging import WARN  # NOQA
-from logging import WARNING  # NOQA
+from logging import CRITICAL
+from logging import DEBUG
+from logging import ERROR
+from logging import FATAL
+from logging import INFO
+from logging import WARN
+from logging import WARNING
 import threading
 from typing import Optional
 
 import colorlog
 
+
+__all__ = [
+    "CRITICAL",
+    "DEBUG",
+    "ERROR",
+    "FATAL",
+    "INFO",
+    "WARN",
+    "WARNING",
+]
 
 _lock: threading.Lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
@@ -28,17 +38,14 @@ def create_default_formatter() -> colorlog.ColoredFormatter:
 
 
 def _get_library_name() -> str:
-
     return __name__.split(".")[0]
 
 
 def _get_library_root_logger() -> logging.Logger:
-
     return logging.getLogger(_get_library_name())
 
 
 def _configure_library_root_logger() -> None:
-
     global _default_handler
 
     with _lock:
@@ -56,7 +63,6 @@ def _configure_library_root_logger() -> None:
 
 
 def _reset_library_root_logger() -> None:
-
     global _default_handler
 
     with _lock:
@@ -239,7 +245,7 @@ def disable_propagation() -> None:
     """Disable propagation of the library log outputs.
 
     Note that log propagation is disabled by default. You only need to use this function
-    to stop log propagation when you use :func:`~optuna.logging.enable_propogation()`.
+    to stop log propagation when you use :func:`~optuna.logging.enable_propagation()`.
 
     Example:
 

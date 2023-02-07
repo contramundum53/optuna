@@ -1,17 +1,22 @@
 from typing import Union
 
-import mxnet as mx
 import numpy as np
 import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration.mxnet import MXNetPruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
+
+
+with try_import():
+    import mxnet as mx
+
+pytestmark = pytest.mark.integration
 
 
 def test_mxnet_pruning_callback() -> None:
     def objective(trial: optuna.trial.Trial, eval_metric: Union[list, str]) -> float:
-
         # Symbol.
         data = mx.symbol.Variable("data")
         data = mx.symbol.FullyConnected(data=data, num_hidden=1)

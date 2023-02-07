@@ -1,20 +1,26 @@
 from typing import Any
 
-from fastai.data.core import DataLoader
-from fastai.data.core import DataLoaders
-from fastai.learner import Learner
-from fastai.metrics import accuracy
 import pytest
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration import FastAIV2PruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
 
 
-def _generate_dummy_dataset() -> torch.utils.data.DataLoader:
+with try_import():
+    from fastai.data.core import DataLoader
+    from fastai.data.core import DataLoaders
+    from fastai.learner import Learner
+    from fastai.metrics import accuracy
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+pytestmark = pytest.mark.integration
+
+
+def _generate_dummy_dataset() -> "torch.utils.data.DataLoader":
     data = torch.zeros(3, 20, dtype=torch.float32)
     target = torch.zeros(3, dtype=torch.int64)
     dataset = torch.utils.data.TensorDataset(data, target)
@@ -23,12 +29,10 @@ def _generate_dummy_dataset() -> torch.utils.data.DataLoader:
 
 @pytest.fixture(scope="session")
 def tmpdir(tmpdir_factory: Any) -> Any:
-
     return tmpdir_factory.mktemp("fastai_integration_test")
 
 
 def test_fastai_pruning_callback(tmpdir: Any) -> None:
-
     train_loader = _generate_dummy_dataset()
     test_loader = _generate_dummy_dataset()
 

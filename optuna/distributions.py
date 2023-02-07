@@ -24,7 +24,7 @@ _float_distribution_deprecated_msg = (
 _int_distribution_deprecated_msg = "Use :class:`~optuna.distributions.IntDistribution` instead."
 
 
-class BaseDistribution(object, metaclass=abc.ABCMeta):
+class BaseDistribution(abc.ABC):
     """Base class for distributions.
 
     Note that distribution classes are not supposed to be called by library users.
@@ -44,6 +44,7 @@ class BaseDistribution(object, metaclass=abc.ABCMeta):
 
         return param_value_in_internal_repr
 
+    @abc.abstractmethod
     def to_internal_repr(self, param_value_in_external_repr: Any) -> float:
         """Convert external representation of a parameter value into internal representation.
 
@@ -55,7 +56,7 @@ class BaseDistribution(object, metaclass=abc.ABCMeta):
             Optuna's internal representation of a parameter value.
         """
 
-        return param_value_in_external_repr
+        raise NotImplementedError
 
     @abc.abstractmethod
     def single(self) -> bool:
@@ -84,11 +85,9 @@ class BaseDistribution(object, metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     def _asdict(self) -> Dict:
-
         return self.__dict__
 
     def __eq__(self, other: Any) -> bool:
-
         if not isinstance(other, BaseDistribution):
             return NotImplemented
         if not type(self) is type(other):
@@ -96,11 +95,9 @@ class BaseDistribution(object, metaclass=abc.ABCMeta):
         return self.__dict__ == other.__dict__
 
     def __hash__(self) -> int:
-
         return hash((self.__class__,) + tuple(sorted(self.__dict__.items())))
 
     def __repr__(self) -> str:
-
         kwargs = ", ".join("{}={}".format(k, v) for k, v in sorted(self._asdict().items()))
         return "{}({})".format(self.__class__.__name__, kwargs)
 
@@ -127,6 +124,7 @@ class FloatDistribution(BaseDistribution):
             ``high`` must be greater than or equal to ``low``.
         log:
             If ``log`` is :obj:`True`, this distribution is in log-scaled domain.
+            In this case, all parameters enqueued to the distribution must be positive values.
             This parameter must be :obj:`False` when the parameter ``step`` is not :obj:`None`.
         step:
             A discretization step. ``step`` must be larger than 0.
@@ -137,7 +135,6 @@ class FloatDistribution(BaseDistribution):
     def __init__(
         self, low: float, high: float, log: bool = False, step: Union[None, float] = None
     ) -> None:
-
         if log and step is not None:
             raise ValueError("The parameter `step` is not supported when `log` is true.")
 
@@ -168,7 +165,6 @@ class FloatDistribution(BaseDistribution):
         self.log = log
 
     def single(self) -> bool:
-
         if self.step is None:
             return self.low == self.high
         else:
@@ -180,13 +176,29 @@ class FloatDistribution(BaseDistribution):
             return (high - low) < step
 
     def _contains(self, param_value_in_internal_repr: float) -> bool:
-
         value = param_value_in_internal_repr
         if self.step is None:
             return self.low <= value <= self.high
         else:
             k = (value - self.low) / self.step
             return self.low <= value <= self.high and abs(k - round(k)) < 1.0e-8
+
+    def to_internal_repr(self, param_value_in_external_repr: float) -> float:
+        try:
+            internal_repr = float(param_value_in_external_repr)
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"'{param_value_in_external_repr}' is not a valid type. "
+                "float-castable value is expected."
+            ) from e
+
+        if np.isnan(internal_repr):
+            raise ValueError(f"`{param_value_in_external_repr}` is invalid value.")
+        if self.log and internal_repr <= 0.0:
+            raise ValueError(
+                f"`{param_value_in_external_repr}` is invalid value for the case log=True."
+            )
+        return internal_repr
 
 
 @deprecated_class("3.0.0", "6.0.0", text=_float_distribution_deprecated_msg)
@@ -321,6 +333,7 @@ class IntDistribution(BaseDistribution):
             ``high`` must be greater than or equal to ``low``.
         log:
             If ``log`` is :obj:`True`, this distribution is in log-scaled domain.
+            In this case, all parameters enqueued to the distribution must be positive values.
             This parameter must be :obj:`False` when the parameter ``step`` is not 1.
         step:
             A discretization step. ``step`` must be a positive integer. This parameter must be 1
@@ -329,7 +342,6 @@ class IntDistribution(BaseDistribution):
     """
 
     def __init__(self, low: int, high: int, log: bool = False, step: int = 1) -> None:
-
         if log and step != 1:
             raise ValueError(
                 "Samplers and other components in Optuna only accept step is 1 "
@@ -360,12 +372,24 @@ class IntDistribution(BaseDistribution):
         self.high = _adjust_int_uniform_high(self.low, high, self.step)
 
     def to_external_repr(self, param_value_in_internal_repr: float) -> int:
-
         return int(param_value_in_internal_repr)
 
     def to_internal_repr(self, param_value_in_external_repr: int) -> float:
+        try:
+            internal_repr = float(param_value_in_external_repr)
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"'{param_value_in_external_repr}' is not a valid type. "
+                "float-castable value is expected."
+            ) from e
 
-        return float(param_value_in_external_repr)
+        if np.isnan(internal_repr):
+            raise ValueError(f"`{param_value_in_external_repr}` is invalid value.")
+        if self.log and internal_repr <= 0.0:
+            raise ValueError(
+                f"`{param_value_in_external_repr}` is invalid value for the case log=True."
+            )
+        return internal_repr
 
     def single(self) -> bool:
         if self.log:
@@ -376,7 +400,6 @@ class IntDistribution(BaseDistribution):
         return (self.high - self.low) < self.step
 
     def _contains(self, param_value_in_internal_repr: float) -> bool:
-
         value = param_value_in_internal_repr
         return self.low <= value <= self.high and (value - self.low) % self.step == 0
 
@@ -489,7 +512,6 @@ class CategoricalDistribution(BaseDistribution):
     """
 
     def __init__(self, choices: Sequence[CategoricalChoiceType]) -> None:
-
         if len(choices) == 0:
             raise ValueError("The `choices` must contain one or more elements.")
         for choice in choices:
@@ -504,11 +526,9 @@ class CategoricalDistribution(BaseDistribution):
         self.choices = tuple(choices)
 
     def to_external_repr(self, param_value_in_internal_repr: float) -> CategoricalChoiceType:
-
         return self.choices[int(param_value_in_internal_repr)]
 
     def to_internal_repr(self, param_value_in_external_repr: CategoricalChoiceType) -> float:
-
         for index, choice in enumerate(self.choices):
             if _categorical_choice_equal(param_value_in_external_repr, choice):
                 return index
@@ -516,16 +536,13 @@ class CategoricalDistribution(BaseDistribution):
         raise ValueError(f"'{param_value_in_external_repr}' not in {self.choices}.")
 
     def single(self) -> bool:
-
         return len(self.choices) == 1
 
     def _contains(self, param_value_in_internal_repr: float) -> bool:
-
         index = int(param_value_in_internal_repr)
         return 0 <= index < len(self.choices)
 
     def __eq__(self, other: Any) -> bool:
-
         if not isinstance(other, BaseDistribution):
             return NotImplemented
         if not isinstance(other, self.__class__):
@@ -655,20 +672,20 @@ def check_distribution_compatibility(
         )
 
 
-def _adjust_discrete_uniform_high(low: float, high: float, q: float) -> float:
+def _adjust_discrete_uniform_high(low: float, high: float, step: float) -> float:
     d_high = decimal.Decimal(str(high))
     d_low = decimal.Decimal(str(low))
-    d_q = decimal.Decimal(str(q))
+    d_step = decimal.Decimal(str(step))
 
     d_r = d_high - d_low
 
-    if d_r % d_q != decimal.Decimal("0"):
+    if d_r % d_step != decimal.Decimal("0"):
         old_high = high
-        high = float((d_r // d_q) * d_q + d_low)
+        high = float((d_r // d_step) * d_step + d_low)
         warnings.warn(
-            "The distribution is specified by [{low}, {old_high}] and q={step}, but the range "
-            "is not divisible by `q`. It will be replaced by [{low}, {high}].".format(
-                low=low, old_high=old_high, high=high, step=q
+            "The distribution is specified by [{low}, {old_high}] and step={step}, but the range "
+            "is not divisible by `step`. It will be replaced by [{low}, {high}].".format(
+                low=low, old_high=old_high, high=high, step=step
             )
         )
 
@@ -690,7 +707,6 @@ def _adjust_int_uniform_high(low: int, high: int, step: int) -> int:
 
 
 def _get_single_value(distribution: BaseDistribution) -> Union[int, float, CategoricalChoiceType]:
-
     assert distribution.single()
 
     if isinstance(
@@ -712,7 +728,6 @@ def _convert_old_distribution_to_new_distribution(
     distribution: BaseDistribution,
     suppress_warning: bool = False,
 ) -> BaseDistribution:
-
     new_distribution: BaseDistribution
 
     # Float distributions.

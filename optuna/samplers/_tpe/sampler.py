@@ -13,9 +13,12 @@ import warnings
 import numpy as np
 
 from optuna._hypervolume import WFG
+from optuna._hypervolume.hssp import _solve_hssp
 from optuna.distributions import BaseDistribution
 from optuna.exceptions import ExperimentalWarning
 from optuna.logging import get_logger
+from optuna.samplers._base import _CONSTRAINTS_KEY
+from optuna.samplers._base import _process_constraints_after_trial
 from optuna.samplers._base import BaseSampler
 from optuna.samplers._random import RandomSampler
 from optuna.samplers._search_space import IntersectionSearchSpace
@@ -34,17 +37,14 @@ _logger = get_logger(__name__)
 
 
 def default_gamma(x: int) -> int:
-
     return min(int(np.ceil(0.1 * x)), 25)
 
 
 def hyperopt_default_gamma(x: int) -> int:
-
     return min(int(np.ceil(0.25 * np.sqrt(x))), 25)
 
 
 def default_weights(x: int) -> np.ndarray:
-
     if x == 0:
         return np.asarray([])
     elif x < 25:
@@ -74,6 +74,7 @@ class TPESampler(BaseSampler):
       Dimensions for Vision Architectures <http://proceedings.mlr.press/v28/bergstra13.pdf>`_
     - `Multiobjective tree-structured parzen estimator for computationally expensive optimization
       problems <https://dl.acm.org/doi/10.1145/3377930.3389817>`_
+    - `Multiobjective Tree-Structured Parzen Estimator <https://doi.org/10.1613/jair.1.13188>`_
 
     Example:
 
@@ -188,12 +189,12 @@ class TPESampler(BaseSampler):
 
             .. note::
                 Abnormally terminated trials often leave behind a record with a state of
-                `RUNNING` in the storage.
+                ``RUNNING`` in the storage.
                 Such "zombie" trial parameters will be avoided by the constant liar algorithm
                 during subsequent sampling.
                 When using an :class:`~optuna.storages.RDBStorage`, it is possible to enable the
                 ``heartbeat_interval`` to change the records for abnormally terminated trials to
-                `FAIL`.
+                ``FAIL``.
 
             .. note::
                 It is recommended to set this value to :obj:`True` during distributed
@@ -203,9 +204,29 @@ class TPESampler(BaseSampler):
                 workers is high.
 
             .. note::
+                This feature can be used for only single-objective optimization; this argument is
+                ignored for multi-objective optimization.
+
+            .. note::
                 Added in v2.8.0 as an experimental feature. The interface may change in newer
                 versions without prior notice. See
                 https://github.com/optuna/optuna/releases/tag/v2.8.0.
+        constraints_func:
+            An optional function that computes the objective constraints. It must take a
+            :class:`~optuna.trial.FrozenTrial` and return the constraints. The return value must
+            be a sequence of :obj:`float` s. A value strictly larger than 0 means that a
+            constraints is violated. A value equal to or smaller than 0 is considered feasible.
+            If ``constraints_func`` returns more than one value for a trial, that trial is
+            considered feasible if and only if all values are equal to 0 or smaller.
+
+            The ``constraints_func`` will be evaluated after each successful trial.
+            The function won't be called when trials fail or they are pruned, but this behavior is
+            subject to change in the future releases.
+
+            .. note::
+                Added in v3.0.0 as an experimental feature. The interface may change in newer
+                versions without prior notice.
+                See https://github.com/optuna/optuna/releases/tag/v3.0.0.
 
     """
 
@@ -225,8 +246,8 @@ class TPESampler(BaseSampler):
         group: bool = False,
         warn_independent_sampling: bool = True,
         constant_liar: bool = False,
+        constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
     ) -> None:
-
         self._parzen_estimator_parameters = _ParzenEstimatorParameters(
             consider_prior,
             prior_weight,
@@ -251,6 +272,7 @@ class TPESampler(BaseSampler):
         self._search_space_group: Optional[_SearchSpaceGroup] = None
         self._search_space = IntersectionSearchSpace(include_pruned=True)
         self._constant_liar = constant_liar
+        self._constraints_func = constraints_func
 
         if multivariate:
             warnings.warn(
@@ -278,15 +300,20 @@ class TPESampler(BaseSampler):
                 ExperimentalWarning,
             )
 
-    def reseed_rng(self) -> None:
+        if constraints_func is not None:
+            warnings.warn(
+                "The ``constraints_func`` option is an experimental feature."
+                " The interface can change in the future.",
+                ExperimentalWarning,
+            )
 
+    def reseed_rng(self) -> None:
         self._rng.seed()
         self._random_sampler.reseed_rng()
 
     def infer_relative_search_space(
         self, study: Study, trial: FrozenTrial
     ) -> Dict[str, BaseDistribution]:
-
         if not self._multivariate:
             return {}
 
@@ -328,7 +355,6 @@ class TPESampler(BaseSampler):
     def sample_relative(
         self, study: Study, trial: FrozenTrial, search_space: Dict[str, BaseDistribution]
     ) -> Dict[str, Any]:
-
         if self._group:
             assert self._search_space_group is not None
             params = {}
@@ -346,33 +372,39 @@ class TPESampler(BaseSampler):
     def _sample_relative(
         self, study: Study, trial: FrozenTrial, search_space: Dict[str, BaseDistribution]
     ) -> Dict[str, Any]:
-
         if search_space == {}:
             return {}
 
         param_names = list(search_space.keys())
-        values, scores = _get_observation_pairs(
-            study, param_names, self._multivariate, self._constant_liar
+        values, scores, violations = _get_observation_pairs(
+            study,
+            param_names,
+            self._constant_liar,
+            self._constraints_func is not None,
         )
 
         # If the number of samples is insufficient, we run random trial.
-        n = len(scores)
+        n = sum(s < float("inf") for s, v in scores)  # Ignore running trials.
         if n < self._n_startup_trials:
             return {}
 
         # We divide data into below and above.
-        indices_below, indices_above = _split_observation_pairs(scores, self._gamma(n))
+        indices_below, indices_above = _split_observation_pairs(scores, self._gamma(n), violations)
         # `None` items are intentionally converted to `nan` and then filtered out.
         # For `nan` conversion, the dtype must be float.
+        # `None` items appear only when `group=True`. We just use the first parameter because the
+        # masks are the same for all parameters in one group.
         config_values = {k: np.asarray(v, dtype=float) for k, v in values.items()}
-        below = _build_observation_dict(config_values, indices_below)
-        above = _build_observation_dict(config_values, indices_above)
+        param_mask = ~np.isnan(list(config_values.values())[0])
+        param_mask_below, param_mask_above = param_mask[indices_below], param_mask[indices_above]
+        below = {k: v[indices_below[param_mask_below]] for k, v in config_values.items()}
+        above = {k: v[indices_above[param_mask_above]] for k, v in config_values.items()}
 
         # We then sample by maximizing log likelihood ratio.
         if study._is_multi_objective():
             weights_below = _calculate_weights_below_for_multi_objective(
-                config_values, scores, indices_below
-            )
+                scores, indices_below, violations
+            )[param_mask_below]
             mpe_below = _ParzenEstimator(
                 below, search_space, self._parzen_estimator_parameters, weights_below
             )
@@ -396,31 +428,37 @@ class TPESampler(BaseSampler):
         param_name: str,
         param_distribution: BaseDistribution,
     ) -> Any:
-
-        values, scores = _get_observation_pairs(
-            study, [param_name], self._multivariate, self._constant_liar
+        values, scores, violations = _get_observation_pairs(
+            study,
+            [param_name],
+            self._constant_liar,
+            self._constraints_func is not None,
         )
 
-        n = len(scores)
+        n = sum(s < float("inf") for s, v in scores)  # Ignore running trials.
 
-        self._log_independent_sampling(n, trial, param_name)
+        # Avoid independent warning at the first sampling of `param_name` when `group=True`.
+        if any(param is not None for param in values[param_name]):
+            self._log_independent_sampling(n, trial, param_name)
 
         if n < self._n_startup_trials:
             return self._random_sampler.sample_independent(
                 study, trial, param_name, param_distribution
             )
 
-        indices_below, indices_above = _split_observation_pairs(scores, self._gamma(n))
+        indices_below, indices_above = _split_observation_pairs(scores, self._gamma(n), violations)
         # `None` items are intentionally converted to `nan` and then filtered out.
         # For `nan` conversion, the dtype must be float.
-        config_values = {k: np.asarray(v, dtype=float) for k, v in values.items()}
-        below = _build_observation_dict(config_values, indices_below)
-        above = _build_observation_dict(config_values, indices_above)
+        config_value = np.asarray(values[param_name], dtype=float)
+        param_mask = ~np.isnan(config_value)
+        param_mask_below, param_mask_above = param_mask[indices_below], param_mask[indices_above]
+        below = {param_name: config_value[indices_below[param_mask_below]]}
+        above = {param_name: config_value[indices_above[param_mask_above]]}
 
         if study._is_multi_objective():
             weights_below = _calculate_weights_below_for_multi_objective(
-                config_values, scores, indices_below
-            )
+                scores, indices_below, violations
+            )[param_mask_below]
             mpe_below = _ParzenEstimator(
                 below,
                 {param_name: param_distribution},
@@ -448,7 +486,6 @@ class TPESampler(BaseSampler):
         log_l: np.ndarray,
         log_g: np.ndarray,
     ) -> Dict[str, Union[float, int]]:
-
         sample_size = next(iter(samples.values())).size
         if sample_size:
             score = log_l - log_g
@@ -516,43 +553,37 @@ class TPESampler(BaseSampler):
         state: TrialState,
         values: Optional[Sequence[float]],
     ) -> None:
-
+        assert state in [TrialState.COMPLETE, TrialState.FAIL, TrialState.PRUNED]
+        if self._constraints_func is not None:
+            _process_constraints_after_trial(self._constraints_func, study, trial, state)
         self._random_sampler.after_trial(study, trial, state, values)
 
 
 def _calculate_nondomination_rank(loss_vals: np.ndarray) -> np.ndarray:
-    vecs = loss_vals.copy()
-
-    # Normalize values
-    lb = vecs.min(axis=0, keepdims=True)
-    ub = vecs.max(axis=0, keepdims=True)
-    vecs = (vecs - lb) / (ub - lb)
-
-    ranks = np.zeros(len(vecs))
-    num_unranked = len(vecs)
+    ranks = np.full(len(loss_vals), -1)
+    num_unranked = len(loss_vals)
     rank = 0
+    domination_mat = np.all(loss_vals[:, None, :] >= loss_vals[None, :, :], axis=2) & np.any(
+        loss_vals[:, None, :] > loss_vals[None, :, :], axis=2
+    )
     while num_unranked > 0:
-        extended = np.tile(vecs, (vecs.shape[0], 1, 1))
-        counts = np.sum(
-            np.logical_and(
-                np.all(extended <= np.swapaxes(extended, 0, 1), axis=2),
-                np.any(extended < np.swapaxes(extended, 0, 1), axis=2),
-            ),
-            axis=1,
-        )
-        vecs[counts == 0] = 1.1  # mark as ranked
-        ranks[counts == 0] = rank
+        counts = np.sum((ranks == -1)[None, :] & domination_mat, axis=1)
+        num_unranked -= np.sum((counts == 0) & (ranks == -1))
+        ranks[(counts == 0) & (ranks == -1)] = rank
         rank += 1
-        num_unranked -= np.sum(counts == 0)
     return ranks
 
 
 def _get_observation_pairs(
     study: Study,
     param_names: List[str],
-    multivariate: bool,
     constant_liar: bool = False,  # TODO(hvy): Remove default value and fix unit tests.
-) -> Tuple[Dict[str, List[Optional[float]]], List[Tuple[float, List[float]]]]:
+    constraints_enabled: bool = False,
+) -> Tuple[
+    Dict[str, List[Optional[float]]],
+    List[Tuple[float, List[float]]],
+    Optional[List[float]],
+]:
     """Get observation pairs from the study.
 
     This function collects observation pairs from the complete or pruned trials of the study.
@@ -569,10 +600,11 @@ def _get_observation_pairs(
     The second element of an observation pair is used to rank observations in
     ``_split_observation_pairs`` method (i.e., observations are sorted lexicographically by
     ``(-step, value)``).
-    """
 
-    if len(param_names) > 1:
-        assert multivariate
+    When ``constraints_enabled`` is :obj:`True`, 1-dimensional violation values are returned
+    as the third element (:obj:`None` otherwise). Each value is a float of 0 or greater and a
+    trial is feasible if and only if its violation score is 0.
+    """
 
     signs = []
     for d in study.directions:
@@ -589,13 +621,8 @@ def _get_observation_pairs(
 
     scores = []
     values: Dict[str, List[Optional[float]]] = {param_name: [] for param_name in param_names}
+    violations: Optional[List[float]] = [] if constraints_enabled else None
     for trial in study.get_trials(deepcopy=False, states=states):
-        # If ``multivariate`` = True and ``group`` = True, we ignore the trials that are not
-        # included in each subspace.
-        # If ``multivariate`` = False, we skip the check.
-        if multivariate and any([param_name not in trial.params for param_name in param_names]):
-            continue
-
         # We extract score from the trial.
         if trial.state is TrialState.COMPLETE:
             if trial.values is None:
@@ -612,13 +639,13 @@ def _get_observation_pairs(
                 else:
                     score = (-step, [signs[0] * intermediate_value])
             else:
-                score = (float("inf"), [0.0])
+                score = (1, [0.0])
         elif trial.state is TrialState.RUNNING:
             if study._is_multi_objective():
                 continue
 
             assert constant_liar
-            score = (-float("inf"), [signs[0] * float("inf")])
+            score = (float("inf"), [signs[0] * float("inf")])
         else:
             assert False
         scores.append(score)
@@ -633,13 +660,56 @@ def _get_observation_pairs(
                 param_value = None
             values[param_name].append(param_value)
 
-    return values, scores
+        if constraints_enabled:
+            assert violations is not None
+            if trial.state != TrialState.RUNNING:
+                constraint = trial.system_attrs.get(_CONSTRAINTS_KEY)
+                if constraint is None:
+                    warnings.warn(
+                        f"Trial {trial.number} does not have constraint values."
+                        " It will be treated as a lower priority than other trials."
+                    )
+                    violation = float("inf")
+                else:
+                    # Violation values of infeasible dimensions are summed up.
+                    violation = sum(v for v in constraint if v > 0)
+                violations.append(violation)
+            else:
+                violations.append(float("inf"))
+
+    return values, scores, violations
 
 
 def _split_observation_pairs(
     loss_vals: List[Tuple[float, List[float]]],
     n_below: int,
+    violations: Optional[List[float]],
 ) -> Tuple[np.ndarray, np.ndarray]:
+    # When constrains is not None, trials are split into below and above
+    # according to the following rules.
+    # 1. Feasible trials are better than infeasible trials.
+    # 2. Infeasible trials are sorted by sum of how much they violate each constraint.
+    # 3. Feasible trials are sorted by loss_vals.
+    if violations is not None:
+        violation_1d = np.array(violations, dtype=float)
+        idx = violation_1d.argsort(kind="stable")
+        if n_below >= len(idx) or violation_1d[idx[n_below]] > 0:
+            # Below is filled by all feasible trials and trials with smaller violation values.
+            indices_below = idx[:n_below]
+            indices_above = idx[n_below:]
+        else:
+            # All trials in below are feasible.
+            # Feasible trials with smaller loss_vals are selected.
+            (feasible_idx,) = (violation_1d == 0).nonzero()
+            (infeasible_idx,) = (violation_1d > 0).nonzero()
+            assert len(feasible_idx) >= n_below
+            feasible_below, feasible_above = _split_observation_pairs(
+                [loss_vals[i] for i in feasible_idx], n_below, None
+            )
+            indices_below = feasible_idx[feasible_below]
+            indices_above = np.concatenate([feasible_idx[feasible_above], infeasible_idx])
+        # `np.sort` is used to keep chronological order.
+        return np.sort(indices_below), np.sort(indices_above)
 
     n_objectives = 1
     if len(loss_vals) > 0:
@@ -650,7 +720,7 @@ def _split_observation_pairs(
             [(s, v[0]) for s, v in loss_vals], dtype=[("step", float), ("score", float)]
         )
 
-        index_loss_ascending = np.argsort(loss_values)
+        index_loss_ascending = np.argsort(loss_values, kind="stable")
         # `np.sort` is used to keep chronological order.
         indices_below = np.sort(index_loss_ascending[:n_below])
         indices_above = np.sort(index_loss_ascending[n_below:])
@@ -668,7 +738,7 @@ def _split_observation_pairs(
         # Nondomination rank-based selection
         i = 0
         last_idx = 0
-        while last_idx + sum(nondomination_ranks == i) <= n_below:
+        while last_idx < n_below and last_idx + sum(nondomination_ranks == i) <= n_below:
             length = indices[nondomination_ranks == i].shape[0]
             indices_below[last_idx : last_idx + length] = indices[nondomination_ranks == i]
             last_idx += length
@@ -692,79 +762,19 @@ def _split_observation_pairs(
     return indices_below, indices_above
 
 
-def _build_observation_dict(
-    config_values: Dict[str, np.ndarray], indices: np.ndarray
-) -> Dict[str, np.ndarray]:
-
-    observation_dict = {}
-    for param_name, param_val in config_values.items():
-        param_values = param_val[indices]
-        observation_dict[param_name] = param_values[~np.isnan(param_values)]
-
-    return observation_dict
-
-
-def _compute_hypervolume(solution_set: np.ndarray, reference_point: np.ndarray) -> float:
-    return WFG().compute(solution_set, reference_point)
-
-
-def _solve_hssp(
-    rank_i_loss_vals: np.ndarray,
-    rank_i_indices: np.ndarray,
-    subset_size: int,
-    reference_point: np.ndarray,
-) -> np.ndarray:
-    """Solve a hypervolume subset selection problem (HSSP) via a greedy algorithm.
-
-    This method is a 1-1/e approximation algorithm to solve HSSP.
-
-    For further information about algorithms to solve HSSP, please refer to the following
-    paper:
-
-    - `Greedy Hypervolume Subset Selection in Low Dimensions
-       <https://ieeexplore.ieee.org/document/7570501>`_
-    """
-    selected_vecs = []  # type: List[np.ndarray]
-    selected_indices = []  # type: List[int]
-    contributions = [
-        _compute_hypervolume(np.asarray([v]), reference_point) for v in rank_i_loss_vals
-    ]
-    hv_selected = 0.0
-    while len(selected_indices) < subset_size:
-        max_index = int(np.argmax(contributions))
-        contributions[max_index] = -1  # mark as selected
-        selected_index = rank_i_indices[max_index]
-        selected_vec = rank_i_loss_vals[max_index]
-        for j, v in enumerate(rank_i_loss_vals):
-            if contributions[j] == -1:
-                continue
-            p = np.max([selected_vec, v], axis=0)
-            contributions[j] -= (
-                _compute_hypervolume(np.asarray(selected_vecs + [p]), reference_point)
-                - hv_selected
-            )
-        selected_vecs += [selected_vec]
-        selected_indices += [selected_index]
-        hv_selected = _compute_hypervolume(np.asarray(selected_vecs), reference_point)
-
-    return np.asarray(selected_indices, dtype=int)
-
-
 def _calculate_weights_below_for_multi_objective(
-    config_values: Dict[str, np.ndarray],
     loss_vals: List[Tuple[float, List[float]]],
     indices: np.ndarray,
+    violations: Optional[List[float]],
 ) -> np.ndarray:
-    # Multi-objective TPE only sees the first parameter to determine the weights.
-    # In the call of `sample_relative`, this logic makes sense because we only have the
-    # intersection search space or group decomposed search space. This means one parameter
-    # misses the one trial, then the other parameter must miss the trial, in this call of
-    # `sample_relative`.
-    # In the call of `sample_independent`, we only have one parameter so the logic makes sense.
-    cvals = list(config_values.values())[0][indices]
+    if violations is None:
+        feasible_mask = np.ones(len(indices), dtype=bool)
+    else:
+        # Hypervolume contributions are calculated only using feasible trials.
+        feasible_mask = np.array(violations, dtype=float)[indices] == 0
 
     # Multi-objective TPE does not support pruning, so it ignores the ``step``.
-    lvals = np.asarray([v for _, v in loss_vals])[indices]
+    lvals = np.asarray([v for _, v in loss_vals])[indices[feasible_mask]]
 
     # Calculate weights based on hypervolume contributions.
     n_below = len(lvals)
@@ -777,13 +787,15 @@ def _calculate_weights_below_for_multi_objective(
         worst_point = np.max(lvals, axis=0)
         reference_point = np.maximum(1.1 * worst_point, 0.9 * worst_point)
         reference_point[reference_point == 0] = EPS
-        hv = _compute_hypervolume(lvals, reference_point)
-        indices = ~np.eye(n_below).astype(bool)
+        hv = WFG().compute(lvals, reference_point)
+        indices_mat = ~np.eye(n_below).astype(bool)
         contributions = np.asarray(
-            [hv - _compute_hypervolume(lvals[indices[i]], reference_point) for i in range(n_below)]
+            [hv - WFG().compute(lvals[indices_mat[i]], reference_point) for i in range(n_below)]
         )
         contributions += EPS
         weights_below = np.clip(contributions / np.max(contributions), 0, 1)
 
-    weights_below = weights_below[~np.isnan(cvals)]
-    return weights_below
+    # For now, EPS weight is assigned to infeasible trials.
+    weights_below_all = np.full(len(indices), EPS)
+    weights_below_all[feasible_mask] = weights_below
+    return weights_below_all

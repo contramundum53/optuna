@@ -1,3 +1,4 @@
+import binascii
 import math
 from typing import Container
 from typing import List
@@ -34,12 +35,12 @@ class HyperbandPruner(BasePruner):
 
     .. note::
         If you use ``HyperbandPruner`` with :class:`~optuna.samplers.TPESampler`,
-        it's recommended to consider to set larger ``n_trials`` or ``timeout`` to make full use of
+        it's recommended to consider setting larger ``n_trials`` or ``timeout`` to make full use of
         the characteristics of :class:`~optuna.samplers.TPESampler`
         because :class:`~optuna.samplers.TPESampler` uses some (by default, :math:`10`)
         :class:`~optuna.trial.Trial`\\ s for its startup.
 
-        As Hyperband runs multiple :class:`~optuna.pruners.SuccessiveHalvingPruner` and collect
+        As Hyperband runs multiple :class:`~optuna.pruners.SuccessiveHalvingPruner` and collects
         trials based on the current :class:`~optuna.trial.Trial`\\ 's bracket ID, each bracket
         needs to observe more than :math:`10` :class:`~optuna.trial.Trial`\\ s
         for :class:`~optuna.samplers.TPESampler` to adapt its search space.
@@ -48,18 +49,17 @@ class HyperbandPruner(BasePruner):
         at least :math:`4 \\times 10` trials are consumed for startup.
 
     .. note::
-        Hyperband has several :class:`~optuna.pruners.SuccessiveHalvingPruner`. Each
-        :class:`~optuna.pruners.SuccessiveHalvingPruner` is referred as "bracket" in the original
-        paper. The number of brackets is an important factor to control the early stopping behavior
-        of Hyperband and is automatically determined by ``min_resource``, ``max_resource`` and
-        ``reduction_factor`` as
-        `The number of brackets = floor(log_{reduction_factor}(max_resource / min_resource)) + 1`.
-        Please set ``reduction_factor`` so that the number of brackets is not too large (about 4 ~
+        Hyperband has several :class:`~optuna.pruners.SuccessiveHalvingPruner`\\ s. Each
+        :class:`~optuna.pruners.SuccessiveHalvingPruner` is referred to as "bracket" in the
+        original paper. The number of brackets is an important factor to control the early
+        stopping behavior of Hyperband and is automatically determined by ``min_resource``,
+        ``max_resource`` and ``reduction_factor`` as
+        :math:`\\mathrm{The\\ number\\ of\\ brackets} =
+        \\mathrm{floor}(\\log_{\\texttt{reduction}\\_\\texttt{factor}}
+        (\\frac{\\texttt{max}\\_\\texttt{resource}}{\\texttt{min}\\_\\texttt{resource}})) + 1`.
+        Please set ``reduction_factor`` so that the number of brackets is not too large (about 4 –
         6 in most use cases). Please see Section 3.6 of the `original paper
         <http://www.jmlr.org/papers/volume18/16-558/16-558.pdf>`_ for the detail.
-
-    .. seealso::
-        Please refer to :meth:`~optuna.trial.Trial.report`.
 
     Example:
 
@@ -132,7 +132,7 @@ class HyperbandPruner(BasePruner):
             See the details for :class:`~optuna.pruners.SuccessiveHalvingPruner`.
         bootstrap_count:
             Parameter specifying the number of trials required in a rung before any trial can be
-            promoted. Incompatible with ``max_resouce`` is ``"auto"``.
+            promoted. Incompatible with ``max_resource`` is ``"auto"``.
             See the details for :class:`~optuna.pruners.SuccessiveHalvingPruner`.
     """
 
@@ -143,7 +143,6 @@ class HyperbandPruner(BasePruner):
         reduction_factor: int = 3,
         bootstrap_count: int = 0,
     ) -> None:
-
         self._min_resource = min_resource
         self._max_resource = max_resource
         self._reduction_factor = reduction_factor
@@ -178,12 +177,8 @@ class HyperbandPruner(BasePruner):
 
     def _try_initialization(self, study: "optuna.study.Study") -> None:
         if self._max_resource == "auto":
-            trials = study.get_trials(deepcopy=False)
-            n_steps = [
-                t.last_step
-                for t in trials
-                if t.state == TrialState.COMPLETE and t.last_step is not None
-            ]
+            trials = study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
+            n_steps = [t.last_step for t in trials if t.last_step is not None]
 
             if not n_steps:
                 return
@@ -249,7 +244,7 @@ class HyperbandPruner(BasePruner):
 
         assert self._n_brackets is not None
         n = (
-            hash("{}_{}".format(study.study_name, trial.number))
+            binascii.crc32("{}_{}".format(study.study_name, trial.number).encode())
             % self._total_trial_allocation_budget
         )
         for bracket_id in range(self._n_brackets):
@@ -267,11 +262,11 @@ class HyperbandPruner(BasePruner):
         # `direction`, and `storage` are used.
         # But for safety, prohibit the other attributes explicitly.
         class _BracketStudy(optuna.study.Study):
-
             _VALID_ATTRS = (
                 "get_trials",
                 "directions",
                 "direction",
+                "_directions",
                 "_storage",
                 "_study_id",
                 "pruner",

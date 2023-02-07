@@ -1,15 +1,20 @@
 from unittest.mock import patch
 
+import pytest
+
 import optuna
 from optuna.storages._cached_storage import _CachedStorage
-from optuna.storages._cached_storage import RDBStorage
+from optuna.storages._rdb.storage import RDBStorage
+from optuna.study import StudyDirection
 from optuna.trial import TrialState
 
 
 def test_create_trial() -> None:
     base_storage = RDBStorage("sqlite:///:memory:")
     storage = _CachedStorage(base_storage)
-    study_id = storage.create_new_study("test-study")
+    study_id = storage.create_new_study(
+        directions=[StudyDirection.MINIMIZE], study_name="test-study"
+    )
     frozen_trial = optuna.trial.FrozenTrial(
         number=1,
         state=TrialState.RUNNING,
@@ -31,7 +36,9 @@ def test_create_trial() -> None:
 def test_set_trial_state_values() -> None:
     base_storage = RDBStorage("sqlite:///:memory:")
     storage = _CachedStorage(base_storage)
-    study_id = storage.create_new_study("test-study")
+    study_id = storage.create_new_study(
+        directions=[StudyDirection.MINIMIZE], study_name="test-study"
+    )
     trial_id = storage.create_new_trial(study_id)
     storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE)
 
@@ -42,7 +49,6 @@ def test_set_trial_state_values() -> None:
 
 
 def test_uncached_set() -> None:
-
     """Test CachedStorage does flush to persistent storages.
 
     The CachedStorage flushes any modification of trials to a persistent storage immediately.
@@ -51,7 +57,9 @@ def test_uncached_set() -> None:
 
     base_storage = RDBStorage("sqlite:///:memory:")
     storage = _CachedStorage(base_storage)
-    study_id = storage.create_new_study("test-study")
+    study_id = storage.create_new_study(
+        directions=[StudyDirection.MINIMIZE], study_name="test-study"
+    )
 
     trial_id = storage.create_new_trial(study_id)
     trial = storage.get_trial(trial_id)
@@ -95,3 +103,17 @@ def test_uncached_set() -> None:
     with patch.object(base_storage, "set_trial_user_attr", return_value=None) as set_mock:
         storage.set_trial_user_attr(trial_id, "attrB", "bar")
         assert set_mock.call_count == 1
+
+
+def test_read_trials_from_remote_storage() -> None:
+    base_storage = RDBStorage("sqlite:///:memory:")
+    storage = _CachedStorage(base_storage)
+    study_id = storage.create_new_study(
+        directions=[StudyDirection.MINIMIZE], study_name="test-study"
+    )
+
+    storage.read_trials_from_remote_storage(study_id)
+
+    # Non-existent study.
+    with pytest.raises(KeyError):
+        storage.read_trials_from_remote_storage(study_id + 1)

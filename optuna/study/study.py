@@ -1,7 +1,9 @@
 import copy
+from numbers import Real
 import threading
 from typing import Any
 from typing import Callable
+from typing import cast
 from typing import Container
 from typing import Dict
 from typing import Iterable
@@ -14,6 +16,8 @@ from typing import TYPE_CHECKING
 from typing import Union
 import warnings
 
+import numpy as np
+
 from optuna import exceptions
 from optuna import logging
 from optuna import pruners
@@ -25,6 +29,7 @@ from optuna._deprecated import deprecated_func
 from optuna._imports import _LazyImport
 from optuna.distributions import _convert_old_distribution_to_new_distribution
 from optuna.distributions import BaseDistribution
+from optuna.storages._cached_storage import _CachedStorage
 from optuna.storages._heartbeat import is_heartbeat_enabled
 from optuna.study._multi_objective import _get_pareto_front_trials
 from optuna.study._optimize import _optimize
@@ -48,6 +53,10 @@ ObjectiveFuncType = Callable[[trial_module.Trial], Union[float, Sequence[float]]
 _logger = logging.get_logger(__name__)
 
 
+class _ThreadLocalStudyAttribute(threading.local):
+    in_optimize_loop: bool = False
+
+
 class Study:
     """A study corresponds to an optimization task, i.e., a set of trials.
 
@@ -67,29 +76,27 @@ class Study:
         sampler: Optional["samplers.BaseSampler"] = None,
         pruner: Optional[pruners.BasePruner] = None,
     ) -> None:
-
         self.study_name = study_name
         storage = storages.get_storage(storage)
         study_id = storage.get_study_id_from_name(study_name)
         self._study_id = study_id
         self._storage = storage
+        self._directions = storage.get_study_directions(study_id)
 
         self.sampler = sampler or samplers.TPESampler()
         self.pruner = pruner or pruners.MedianPruner()
 
-        self._optimize_lock = threading.Lock()
+        self._thread_local = _ThreadLocalStudyAttribute()
         self._stop_flag = False
 
     def __getstate__(self) -> Dict[Any, Any]:
-
         state = self.__dict__.copy()
-        del state["_optimize_lock"]
+        del state["_thread_local"]
         return state
 
     def __setstate__(self, state: Dict[Any, Any]) -> None:
-
         self.__dict__.update(state)
-        self._optimize_lock = threading.Lock()
+        self._thread_local = _ThreadLocalStudyAttribute()
 
     @property
     def best_params(self) -> Dict[str, Any]:
@@ -193,7 +200,7 @@ class Study:
             A list of :class:`~optuna.study.StudyDirection` objects.
         """
 
-        return self._storage.get_study_directions(self._study_id)
+        return self._directions
 
     @property
     def trials(self) -> List[FrozenTrial]:
@@ -205,6 +212,10 @@ class Study:
 
         Returns:
             A list of :class:`~optuna.trial.FrozenTrial` objects.
+
+            .. seealso::
+                See :func:`~optuna.study.Study.get_trials` for related method.
+
         """
 
         return self.get_trials(deepcopy=True, states=None)
@@ -217,6 +228,9 @@ class Study:
         """Return all trials in the study.
 
         The returned trials are ordered by trial number.
+
+        .. seealso::
+            See :attr:`~optuna.study.Study.trials` for related property.
 
         Example:
             .. testcode::
@@ -246,8 +260,9 @@ class Study:
         Returns:
             A list of :class:`~optuna.trial.FrozenTrial` objects.
         """
+        if isinstance(self._storage, _CachedStorage):
+            self._storage.read_trials_from_remote_storage(self._study_id)
 
-        self._storage.read_trials_from_remote_storage(self._study_id)
         return self._storage.get_all_trials(self._study_id, deepcopy=deepcopy, states=states)
 
     @property
@@ -290,6 +305,7 @@ class Study:
         return copy.deepcopy(self._storage.get_study_user_attrs(self._study_id))
 
     @property
+    @deprecated_func("3.1.0", "6.0.0")
     def system_attrs(self) -> Dict[str, Any]:
         """Return system attributes.
 
@@ -305,7 +321,7 @@ class Study:
         n_trials: Optional[int] = None,
         timeout: Optional[float] = None,
         n_jobs: int = 1,
-        catch: Tuple[Type[Exception], ...] = (),
+        catch: Union[Iterable[Type[Exception]], Type[Exception]] = (),
         callbacks: Optional[List[Callable[["Study", FrozenTrial], None]]] = None,
         gc_after_trial: bool = False,
         show_progress_bar: bool = False,
@@ -320,7 +336,7 @@ class Study:
 
         Optimization will be stopped when receiving a termination signal such as SIGINT and
         SIGTERM. Unlike other signals, a trial is automatically and cleanly failed when receiving
-        SIGINT (Ctrl+C). If :obj:`n_jobs` is greater than one or if another signal than SIGINT
+        SIGINT (Ctrl+C). If ``n_jobs`` is greater than one or if another signal than SIGINT
         is used, the interrupted trial state won't be properly updated.
 
         Example:
@@ -358,7 +374,7 @@ class Study:
                 :func:`~optuna.study.Study.stop` is called or, a termination signal such as
                 SIGTERM or Ctrl+C is received.
             n_jobs:
-                The number of parallel jobs. If this argument is set to :obj:`-1`, the number is
+                The number of parallel jobs. If this argument is set to ``-1``, the number is
                 set to CPU count.
 
                 .. note::
@@ -395,7 +411,7 @@ class Study:
             show_progress_bar:
                 Flag to show progress bars or not. To disable progress bar, set this :obj:`False`.
                 Currently, progress bar is experimental feature and disabled
-                when ``n_trials`` is :obj:`None``, ``timeout`` not is :obj:`None`, and
+                when ``n_trials`` is :obj:`None`, ``timeout`` not is :obj:`None`, and
                 ``n_jobs`` :math:`\\ne 1`.
 
         Raises:
@@ -409,7 +425,7 @@ class Study:
             n_trials=n_trials,
             timeout=timeout,
             n_jobs=n_jobs,
-            catch=catch,
+            catch=tuple(catch) if isinstance(catch, Iterable) else (catch,),
             callbacks=callbacks,
             gc_after_trial=gc_after_trial,
             show_progress_bar=show_progress_bar,
@@ -481,9 +497,8 @@ class Study:
             A :class:`~optuna.trial.Trial`.
         """
 
-        if not self._optimize_lock.locked():
-            if is_heartbeat_enabled(self._storage):
-                warnings.warn("Heartbeat of storage is supposed to be used with Study.optimize.")
+        if not self._thread_local.in_optimize_loop and is_heartbeat_enabled(self._storage):
+            warnings.warn("Heartbeat of storage is supposed to be used with Study.optimize.")
 
         fixed_distributions = fixed_distributions or {}
         fixed_distributions = {
@@ -492,7 +507,8 @@ class Study:
         }
 
         # Sync storage once every trial.
-        self._storage.read_trials_from_remote_storage(self._study_id)
+        if isinstance(self._storage, _CachedStorage):
+            self._storage.read_trials_from_remote_storage(self._study_id)
 
         trial_id = self._pop_waiting_trial_id()
         if trial_id is None:
@@ -589,7 +605,11 @@ class Study:
         """
 
         return _tell_with_warning(
-            study=self, trial=trial, values=values, state=state, skip_if_finished=skip_if_finished
+            study=self,
+            trial=trial,
+            value_or_values=values,
+            state=state,
+            skip_if_finished=skip_if_finished,
         )
 
     def set_user_attr(self, key: str, value: Any) -> None:
@@ -636,6 +656,7 @@ class Study:
 
         self._storage.set_study_user_attr(self._study_id, key, value)
 
+    @deprecated_func("3.1.0", "6.0.0")
     def set_system_attr(self, key: str, value: Any) -> None:
         """Set a system attribute to the study.
 
@@ -714,7 +735,6 @@ class Study:
         return _dataframe._trials_dataframe(self, attrs, multi_index)
 
     def stop(self) -> None:
-
         """Exit from the current optimization loop after the running trials finish.
 
         This method lets the running :meth:`~optuna.study.Study.optimize` method return
@@ -743,8 +763,7 @@ class Study:
 
         """
 
-        if self._optimize_lock.acquire(False):
-            self._optimize_lock.release()
+        if not self._thread_local.in_optimize_loop:
             raise RuntimeError(
                 "`Study.stop` is supposed to be invoked inside an objective function or a "
                 "callback."
@@ -753,7 +772,10 @@ class Study:
         self._stop_flag = True
 
     def enqueue_trial(
-        self, params: Dict[str, Any], user_attrs: Optional[Dict[str, Any]] = None
+        self,
+        params: Dict[str, Any],
+        user_attrs: Optional[Dict[str, Any]] = None,
+        skip_if_exists: bool = False,
     ) -> None:
         """Enqueue a trial with given parameter values.
 
@@ -786,12 +808,22 @@ class Study:
                 Parameter values to pass your objective function.
             user_attrs:
                 A dictionary of user-specific attributes other than ``params``.
+            skip_if_exists:
+                When :obj:`True`, prevents duplicate trials from being enqueued again.
+
+                .. note::
+                    This method might produce duplicated trials if called simultaneously
+                    by multiple processes at the same time with same ``params`` dict.
 
         .. seealso::
 
             Please refer to :ref:`enqueue_trial_tutorial` for the tutorial of specifying
             hyperparameters manually.
         """
+
+        if skip_if_exists and self._should_skip_enqueue(params):
+            _logger.info(f"Trial with params {params} already exists. Skipping enqueue.")
+            return
 
         self.add_trial(
             create_trial(
@@ -916,7 +948,6 @@ class Study:
         return len(self.directions) > 1
 
     def _pop_waiting_trial_id(self) -> Optional[int]:
-
         for trial in self._storage.get_all_trials(
             self._study_id, deepcopy=False, states=(TrialState.WAITING,)
         ):
@@ -927,6 +958,37 @@ class Study:
             return trial._trial_id
 
         return None
+
+    def _should_skip_enqueue(self, params: Dict[str, Any]) -> bool:
+        for trial in self.get_trials(deepcopy=False):
+            trial_params = trial.system_attrs.get("fixed_params", trial.params)
+            if trial_params.keys() != params.keys():
+                # Can't have repeated trials if different params are suggested.
+                continue
+
+            repeated_params: List[bool] = []
+            for param_name, param_value in params.items():
+                existing_param = trial_params[param_name]
+                if not isinstance(param_value, type(existing_param)):
+                    # Enqueued param has distribution that does not match existing param
+                    # (e.g. trying to enqueue categorical to float param).
+                    # We are not doing anything about it here, since sanitization should
+                    # be handled regardless if `skip_if_exists` is `True`.
+                    repeated_params.append(False)
+                    continue
+
+                is_repeated = (
+                    np.isnan(float(param_value))
+                    or np.isclose(float(param_value), float(existing_param), atol=0.0)
+                    if isinstance(param_value, Real)
+                    else param_value == existing_param
+                )
+                repeated_params.append(is_repeated)
+
+            if all(repeated_params):
+                return True
+
+        return False
 
     @deprecated_func("2.5.0", "4.0.0")
     def _ask(self) -> trial_module.Trial:
@@ -1088,7 +1150,7 @@ def create_study(
 
     storage = storages.get_storage(storage)
     try:
-        study_id = storage.create_new_study(study_name)
+        study_id = storage.create_new_study(direction_objects, study_name)
     except exceptions.DuplicatedStudyError:
         if load_if_exists:
             assert study_name is not None
@@ -1106,8 +1168,6 @@ def create_study(
 
     study_name = storage.get_study_name_from_id(study_id)
     study = Study(study_name=study_name, storage=storage, sampler=sampler, pruner=pruner)
-
-    study._storage.set_study_directions(study_id, direction_objects)
 
     return study
 
@@ -1346,8 +1406,8 @@ def copy_study(
         load_if_exists=False,
     )
 
-    for key, value in from_study.system_attrs.items():
-        to_study.set_system_attr(key, value)
+    for key, value in from_study._storage.get_study_system_attrs(from_study._study_id).items():
+        to_study._storage.set_study_system_attr(to_study._study_id, key, value)
 
     for key, value in from_study.user_attrs.items():
         to_study.set_user_attr(key, value)
@@ -1411,4 +1471,46 @@ def get_all_study_summaries(
     """
 
     storage = storages.get_storage(storage)
-    return storage.get_all_study_summaries(include_best_trial=include_best_trial)
+    frozen_studies = storage.get_all_studies()
+    study_summaries = []
+
+    for s in frozen_studies:
+        all_trials = storage.get_all_trials(s._study_id)
+        completed_trials = [t for t in all_trials if t.state == TrialState.COMPLETE]
+
+        n_trials = len(all_trials)
+
+        if len(s.directions) == 1:
+            direction = s.direction
+            directions = None
+            if include_best_trial and len(completed_trials) != 0:
+                if direction == StudyDirection.MAXIMIZE:
+                    best_trial = max(completed_trials, key=lambda t: cast(float, t.value))
+                else:
+                    best_trial = min(completed_trials, key=lambda t: cast(float, t.value))
+            else:
+                best_trial = None
+        else:
+            direction = None
+            directions = s.directions
+            best_trial = None
+
+        datetime_start = min(
+            [t.datetime_start for t in all_trials if t.datetime_start is not None], default=None
+        )
+
+        study_summaries.append(
+            StudySummary(
+                study_name=s.study_name,
+                direction=direction,
+                best_trial=best_trial,
+                user_attrs=s.user_attrs,
+                system_attrs=s.system_attrs,
+                n_trials=n_trials,
+                datetime_start=datetime_start,
+                study_id=s._study_id,
+                directions=directions,
+            )
+        )
+
+    return study_summaries

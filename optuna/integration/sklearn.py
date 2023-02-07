@@ -14,8 +14,6 @@ from typing import Optional
 from typing import Union
 
 import numpy as np
-import scipy as sp
-from scipy.sparse import spmatrix
 
 from optuna import distributions
 from optuna import logging
@@ -32,6 +30,8 @@ from optuna.trial import Trial
 
 with try_import() as _imports:
     import pandas as pd
+    import scipy as sp
+    from scipy.sparse import spmatrix
     import sklearn
     from sklearn.base import BaseEstimator
     from sklearn.base import clone
@@ -64,10 +64,8 @@ _logger = logging.get_logger(__name__)
 def _check_fit_params(
     X: TwoDimArrayLikeType, fit_params: Dict, indices: OneDimArrayLikeType
 ) -> Dict:
-
     fit_params_validated = {}
     for key, value in fit_params.items():
-
         # NOTE Original implementation:
         # https://github.com/scikit-learn/scikit-learn/blob/ \
         # 2467e1b84aeb493a22533fa15ff92e0d7c05ed1c/sklearn/utils/validation.py#L1324-L1328
@@ -86,7 +84,6 @@ def _check_fit_params(
 # https://github.com/scikit-learn/scikit-learn/blob/ \
 # 8caa93889f85254fc3ca84caa0a24a1640eebdd1/sklearn/utils/validation.py#L131-L135
 def _is_arraylike(x: Any) -> bool:
-
     return hasattr(x, "__len__") or hasattr(x, "shape") or hasattr(x, "__array__")
 
 
@@ -94,7 +91,6 @@ def _is_arraylike(x: Any) -> bool:
 # https://github.com/scikit-learn/scikit-learn/blob/ \
 # 8caa93889f85254fc3ca84caa0a24a1640eebdd1/sklearn/utils/validation.py#L217-L234
 def _make_indexable(iterable: IterableType) -> IndexableType:
-
     tocsr_func = getattr(iterable, "tocsr", None)
     if tocsr_func is not None and sp.sparse.issparse(iterable):
         return tocsr_func(iterable)
@@ -106,7 +102,6 @@ def _make_indexable(iterable: IterableType) -> IndexableType:
 
 
 def _num_samples(x: ArrayLikeType) -> int:
-
     # NOTE For dask dataframes
     # https://github.com/scikit-learn/scikit-learn/blob/ \
     # 8caa93889f85254fc3ca84caa0a24a1640eebdd1/sklearn/utils/validation.py#L155-L158
@@ -124,7 +119,6 @@ def _num_samples(x: ArrayLikeType) -> int:
 def _safe_indexing(
     X: Union[OneDimArrayLikeType, TwoDimArrayLikeType], indices: OneDimArrayLikeType
 ) -> Union[OneDimArrayLikeType, TwoDimArrayLikeType]:
-
     if X is None:
         return X
 
@@ -203,7 +197,6 @@ class _Objective:
         return_train_score: bool,
         scoring: Callable[..., Number],
     ) -> None:
-
         self.cv = cv
         self.enable_pruning = enable_pruning
         self.error_score = error_score
@@ -218,7 +211,6 @@ class _Objective:
         self.y = y
 
     def __call__(self, trial: Trial) -> float:
-
         estimator = clone(self.estimator)
         params = self._get_params(trial)
 
@@ -246,7 +238,6 @@ class _Objective:
     def _cross_validate_with_pruning(
         self, trial: Trial, estimator: "BaseEstimator"
     ) -> Mapping[str, OneDimArrayLikeType]:
-
         if is_classifier(estimator):
             partial_fit_params = self.fit_params.copy()
             y = self.y.values if isinstance(self.y, pd.Series) else self.y
@@ -291,7 +282,6 @@ class _Objective:
         return scores
 
     def _get_params(self, trial: Trial) -> Dict[str, Any]:
-
         return {
             name: trial._suggest(name, distribution)
             for name, distribution in self.param_distributions.items()
@@ -304,7 +294,6 @@ class _Objective:
         test: List[int],
         partial_fit_params: Dict[str, Any],
     ) -> List[Number]:
-
         X_train, y_train = _safe_split(estimator, self.X, self.y, train)
         X_test, y_test = _safe_split(estimator, self.X, self.y, test, train_indices=train)
 
@@ -348,7 +337,6 @@ class _Objective:
         return ret
 
     def _store_scores(self, trial: Trial, scores: Mapping[str, OneDimArrayLikeType]) -> None:
-
         for name, array in scores.items():
             if name in ["test_score", "train_score"]:
                 for i, score in enumerate(array):
@@ -376,11 +364,12 @@ class OptunaSearchCV(BaseEstimator):
         cv:
             Cross-validation strategy. Possible inputs for cv are:
 
+            - :obj:`None`, to use the default 5-fold cross validation,
             - integer to specify the number of folds in a CV splitter,
-            - a CV splitter,
+            - `CV splitter <https://scikit-learn.org/stable/glossary.html#term-CV-splitter>`_,
             - an iterable yielding (train, validation) splits as arrays of indices.
 
-            For integer, if :obj:`estimator` is a classifier and :obj:`y` is
+            For integer, if ``estimator`` is a classifier and ``y`` is
             either binary or multiclass,
             ``sklearn.model_selection.StratifiedKFold`` is used. otherwise,
             ``sklearn.model_selection.KFold`` is used.
@@ -400,8 +389,8 @@ class OptunaSearchCV(BaseEstimator):
             estimator supports ``partial_fit``.
 
         n_jobs:
-            Number of :obj:`threading` based parallel jobs. :obj:`-1` means
-            using the number is set to CPU count.
+            Number of :obj:`threading` based parallel jobs. :obj:`None` means ``1``.
+            ``-1`` means using the number is set to CPU count.
 
                 .. note::
                     ``n_jobs`` allows parallelization using :obj:`threading` and may suffer from
@@ -411,7 +400,7 @@ class OptunaSearchCV(BaseEstimator):
 
         n_trials:
             Number of trials. If :obj:`None`, there is no limitation on the
-            number of trials. If :obj:`timeout` is also set to :obj:`None`,
+            number of trials. If ``timeout`` is also set to :obj:`None`,
             the study continues to create trials until it receives a
             termination signal such as Ctrl+C or SIGTERM. This trades off
             runtime vs quality of the solution.
@@ -455,7 +444,7 @@ class OptunaSearchCV(BaseEstimator):
         timeout:
             Time limit in seconds for the search of appropriate models. If
             :obj:`None`, the study is executed without time limitation. If
-            :obj:`n_trials` is also set to :obj:`None`, the study continues to
+            ``n_trials`` is also set to :obj:`None`, the study continues to
             create trials until it receives a termination signal such as
             Ctrl+C or SIGTERM. This trades off runtime vs quality of the
             solution.
@@ -521,7 +510,6 @@ class OptunaSearchCV(BaseEstimator):
 
     @property
     def _estimator_type(self) -> str:
-
         return self.estimator._estimator_type
 
     @property
@@ -691,11 +679,12 @@ class OptunaSearchCV(BaseEstimator):
         self,
         estimator: "BaseEstimator",
         param_distributions: Mapping[str, distributions.BaseDistribution],
-        cv: Optional[Union["BaseCrossValidator", int]] = 5,
+        *,
+        cv: Optional[Union[int, "BaseCrossValidator", Iterable]] = None,
         enable_pruning: bool = False,
         error_score: Union[Number, float, str] = np.nan,
         max_iter: int = 1000,
-        n_jobs: int = 1,
+        n_jobs: Optional[int] = None,
         n_trials: int = 10,
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         refit: bool = True,
@@ -707,18 +696,21 @@ class OptunaSearchCV(BaseEstimator):
         verbose: int = 0,
         callbacks: Optional[List[Callable[[study_module.Study, FrozenTrial], None]]] = None,
     ) -> None:
-
         _imports.check()
 
         if not isinstance(param_distributions, dict):
             raise TypeError("param_distributions must be a dictionary.")
 
-        # TODO(himkt): Remove this method with the deletion of deprecated distributions.
-        # https://github.com/optuna/optuna/issues/2941
-        param_distributions = {
-            key: _convert_old_distribution_to_new_distribution(dist)
-            for key, dist in param_distributions.items()
-        }
+        # Rejecting deprecated distributions as they may cause cryptic error
+        # when cloning OptunaSearchCV instance.
+        # https://github.com/optuna/optuna/issues/4084
+        for key, dist in param_distributions.items():
+            if dist != _convert_old_distribution_to_new_distribution(dist):
+                raise ValueError(
+                    f"Deprecated distribution is specified in `{key}` of param_distributions. "
+                    "Rejecting this because it may cause unexpected behavior. "
+                    "Please use new distributions such as FloatDistribution etc."
+                )
 
         self.cv = cv
         self.enable_pruning = enable_pruning
@@ -726,7 +718,7 @@ class OptunaSearchCV(BaseEstimator):
         self.estimator = estimator
         self.max_iter = max_iter
         self.n_trials = n_trials
-        self.n_jobs = n_jobs
+        self.n_jobs = n_jobs if n_jobs else 1
         self.param_distributions = param_distributions
         self.random_state = random_state
         self.refit = refit
@@ -739,7 +731,6 @@ class OptunaSearchCV(BaseEstimator):
         self.callbacks = callbacks
 
     def _check_is_fitted(self) -> None:
-
         attributes = ["n_splits_", "sample_indices_", "scorer_", "study_"]
 
         if self.refit:
@@ -748,7 +739,6 @@ class OptunaSearchCV(BaseEstimator):
         check_is_fitted(self, attributes)
 
     def _check_params(self) -> None:
-
         if not hasattr(self.estimator, "fit"):
             raise ValueError("estimator must be a scikit-learn estimator.")
 
@@ -766,7 +756,6 @@ class OptunaSearchCV(BaseEstimator):
             raise ValueError("direction of study must be 'maximize'.")
 
     def _more_tags(self) -> Dict[str, bool]:
-
         return {"non_deterministic": True, "no_validation": True}
 
     def _refit(
@@ -775,7 +764,6 @@ class OptunaSearchCV(BaseEstimator):
         y: Optional[Union[OneDimArrayLikeType, TwoDimArrayLikeType]] = None,
         **fit_params: Any,
     ) -> "OptunaSearchCV":
-
         n_samples = _num_samples(X)
 
         self.best_estimator_ = clone(self.estimator)
@@ -821,8 +809,7 @@ class OptunaSearchCV(BaseEstimator):
                 Parameters passed to ``fit`` on the estimator.
 
         Returns:
-            self:
-                Return self.
+            self.
         """
 
         self._check_params()
@@ -926,8 +913,7 @@ class OptunaSearchCV(BaseEstimator):
                 Target variable.
 
         Returns:
-            score:
-                Scaler score.
+            Scaler score.
         """
 
         return self.scorer_(self.best_estimator_, X, y)

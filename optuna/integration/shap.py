@@ -29,8 +29,9 @@ with try_import() as _imports:
 class ShapleyImportanceEvaluator(BaseImportanceEvaluator):
     """Shapley (SHAP) parameter importance evaluator.
 
-    This evaluator fits a random forest that predicts objective values given hyperparameter
-    configurations. Feature importances are then computed as the mean absolute SHAP values.
+    This evaluator fits a random forest regression model that predicts the objective values
+    of :class:`~optuna.trial.TrialState.COMPLETE` trials given their parameter configurations.
+    Feature importances are then computed as the mean absolute SHAP values.
 
     .. note::
 
@@ -69,7 +70,6 @@ class ShapleyImportanceEvaluator(BaseImportanceEvaluator):
         *,
         target: Optional[Callable[[FrozenTrial], float]] = None,
     ) -> Dict[str, float]:
-
         if target is None and study._is_multi_objective():
             raise ValueError(
                 "If the `study` is being used for multi-objective optimization, "

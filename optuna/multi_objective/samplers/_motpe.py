@@ -32,6 +32,7 @@ class MOTPEMultiObjectiveSampler(BaseMultiObjectiveSampler):
 
     - `Multiobjective tree-structured parzen estimator for computationally expensive optimization
       problems <https://dl.acm.org/doi/abs/10.1145/3377930.3389817>`_
+    - `Multiobjective Tree-Structured Parzen Estimator <https://doi.org/10.1613/jair.1.13188>`_
 
     Args:
         consider_prior:
@@ -110,7 +111,6 @@ class MOTPEMultiObjectiveSampler(BaseMultiObjectiveSampler):
         weights_above: Callable[[int], np.ndarray] = _default_weights_above,
         seed: Optional[int] = None,
     ) -> None:
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ExperimentalWarning)
             self._motpe_sampler = MOTPESampler(
@@ -150,7 +150,6 @@ class MOTPEMultiObjectiveSampler(BaseMultiObjectiveSampler):
         param_name: str,
         param_distribution: BaseDistribution,
     ) -> Any:
-
         return self._motpe_sampler.sample_independent(
             _create_study(study), _create_trial(trial), param_name, param_distribution
         )

@@ -3,10 +3,16 @@ import shutil
 import tempfile
 
 import pytest
-from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration.tensorboard import TensorBoardCallback
+
+
+with try_import():
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+pytestmark = pytest.mark.integration
 
 
 def _objective_func(trial: optuna.trial.Trial) -> float:
@@ -16,7 +22,6 @@ def _objective_func(trial: optuna.trial.Trial) -> float:
     x = trial.suggest_float("x", -1.0, 1.0)
     y = trial.suggest_float("y", 20.0, 30.0, log=True)
     z = trial.suggest_categorical("z", (-1.0, 1.0))
-    assert isinstance(z, float)
     trial.set_user_attr("my_user_attr", "my_user_attr_value")
     return u + v + w + (x - 2) ** 2 + (y - 25) ** 2 + z
 

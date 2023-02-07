@@ -10,6 +10,7 @@ from optuna import load_study
 from optuna import pruners
 from optuna import Trial
 from optuna import TrialPruned
+from optuna._experimental import experimental_class
 from optuna._imports import try_import
 from optuna.integration.allennlp._variables import _VariableManager
 from optuna.integration.allennlp._variables import OPTUNA_ALLENNLP_DISTRIBUTED_FLAG
@@ -53,7 +54,6 @@ def _create_pruner(
     pruner_class: str,
     pruner_kwargs: Dict[str, Any],
 ) -> Optional[pruners.BasePruner]:
-
     """Restore a pruner which is defined in `create_study`.
 
     `AllenNLPPruningCallback` is launched as a sub-process of
@@ -71,6 +71,7 @@ def _create_pruner(
     return pruner(**pruner_kwargs)
 
 
+@experimental_class("2.0.0")
 @TrainerCallback.register("optuna_pruner")
 class AllenNLPPruningCallback(TrainerCallback):
     """AllenNLP callback to prune unpromising trials.
@@ -114,7 +115,7 @@ class AllenNLPPruningCallback(TrainerCallback):
     ):
         _imports.check()
 
-        if version.parse(allennlp.__version__) < version.parse("2.0.0"):
+        if version.parse(allennlp.__version__) < version.parse("2.0.0"):  # type: ignore
             raise ImportError(
                 "`AllenNLPPruningCallback` requires AllenNLP>=v2.0.0."
                 "If you want to use a callback with an old version of AllenNLP, "

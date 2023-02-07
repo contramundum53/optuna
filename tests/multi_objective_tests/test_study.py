@@ -7,7 +7,10 @@ import pytest
 
 import optuna
 from optuna.study._study_direction import StudyDirection
-from optuna.testing.storage import StorageSupplier
+from optuna.testing.storages import StorageSupplier
+
+
+pytestmark = pytest.mark.filterwarnings("ignore::FutureWarning")
 
 
 def test_create_study() -> None:
@@ -96,17 +99,6 @@ def test_study_user_attrs() -> None:
     assert study.user_attrs == {"foo": "quux", "baz": "qux"}
 
 
-def test_study_system_attrs() -> None:
-    study = optuna.multi_objective.create_study(["minimize", "maximize"])
-    assert study.system_attrs == {"multi_objective:study:directions": ["minimize", "maximize"]}
-
-    study.set_system_attr("foo", "bar")
-    assert study.system_attrs == {
-        "multi_objective:study:directions": ["minimize", "maximize"],
-        "foo": "bar",
-    }
-
-
 def test_enqueue_trial() -> None:
     study = optuna.multi_objective.create_study(["minimize", "maximize"])
 
@@ -145,7 +137,6 @@ def test_callbacks() -> None:
 
 
 def test_log_completed_trial(capsys: _pytest.capture.CaptureFixture) -> None:
-
     # We need to reconstruct our default handler to properly capture stderr.
     optuna.logging._reset_library_root_logger()
     optuna.logging.set_verbosity(optuna.logging.INFO)

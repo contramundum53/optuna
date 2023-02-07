@@ -4,15 +4,21 @@ import typing
 from unittest.mock import patch
 
 import numpy as np
-import tensorflow as tf
+import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration import TensorFlowPruningHook
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
 
 
-def fixed_value_input_fn() -> typing.Tuple[typing.Dict[str, tf.Tensor], tf.Tensor]:
+with try_import():
+    import tensorflow as tf
 
+pytestmark = pytest.mark.integration
+
+
+def fixed_value_input_fn() -> typing.Tuple[typing.Dict[str, "tf.Tensor"], "tf.Tensor"]:
     x_train = np.zeros([16, 20])
     y_train = np.zeros(16)
     dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
@@ -24,7 +30,6 @@ def fixed_value_input_fn() -> typing.Tuple[typing.Dict[str, tf.Tensor], tf.Tenso
 
 def test_tensorflow_pruning_hook() -> None:
     def objective(trial: optuna.trial.Trial) -> float:
-
         clf = tf.estimator.DNNClassifier(
             hidden_units=[],
             feature_columns=[tf.feature_column.numeric_column(key="x", shape=[20])],

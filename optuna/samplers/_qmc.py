@@ -1,4 +1,3 @@
-import sys
 from typing import Any
 from typing import Dict
 from typing import Optional
@@ -29,7 +28,7 @@ class QMCSampler(BaseSampler):
     """A Quasi Monte Carlo Sampler that generates low-discrepancy sequences.
 
     Quasi Monte Carlo (QMC) sequences are designed to have lower discrepancies than
-    standard random seqeunces. They are known to perform better than the standard
+    standard random sequences. They are known to perform better than the standard
     randam sequences in hyperparameter optimization.
 
     For further information about the use of QMC sequences for hyperparameter optimization,
@@ -44,27 +43,23 @@ class QMCSampler(BaseSampler):
     <https://scipy.github.io/devdocs/reference/stats.qmc.html>`_.
 
     .. note:
-        If your search space contains categorical parameters, it samples the catagorical
+        If your search space contains categorical parameters, it samples the categorical
         parameters by its `independent_sampler` without using QMC algorithm.
 
     .. note::
         The search space of the sampler is determined by either previous trials in the study or
         the first trial that this sampler samples.
 
-        If there are previous trials in the study, :class:`~optuna.samplers.QMCSamper` infers its
+        If there are previous trials in the study, :class:`~optuna.samplers.QMCSampler` infers its
         search space using the trial which was created first in the study.
 
         Otherwise (if the study has no previous trials), :class:`~optuna.samplers.QMCSampler`
         samples the first trial using its `independent_sampler` and then infers the search space
         in the second trial.
 
-        As mentioned above, the search space of the :class:`~optuna.sampler.QMCSampler` is
+        As mentioned above, the search space of the :class:`~optuna.samplers.QMCSampler` is
         determined by the first trial of the study. Once the search space is determined, it cannot
         be changed afterwards.
-
-    .. note:
-        `QMCSampler` is not supported for Python 3.6 as it depends on `scipy.stat.qmc` module which
-        only supports Python 3.7 or the later versions.
 
     Args:
         qmc_type:
@@ -82,7 +77,7 @@ class QMCSampler(BaseSampler):
             sequences.
 
         seed:
-            A seed for `QMCSampler`. This argument is used only when `scramble` is :obj:`True`.
+            A seed for ``QMCSampler``. This argument is used only when ``scramble`` is :obj:`True`.
             If this is :obj:`None`, the seed is initialized randomly. Default is :obj:`None`.
 
             .. note::
@@ -111,7 +106,7 @@ class QMCSampler(BaseSampler):
             Note that the parameters of the first trial in a study are sampled via an
             independent sampler in most cases, so no warning messages are emitted in such cases.
 
-        warn_asyncronous_seeding:
+        warn_asynchronous_seeding:
             If this is :obj:`True`, a warning message is emitted when the scrambling
             (randomization) is applied to the QMC sequence and the random seed of the sampler is
             not set manually.
@@ -120,7 +115,7 @@ class QMCSampler(BaseSampler):
                 When using parallel and/or distributed optimization without manually
                 setting the seed, the seed is set randomly for each instances of
                 :class:`~optuna.samplers.QMCSampler` for different workers, which ends up
-                asyncronous seeding for multiple samplers used in the optimization.
+                asynchronous seeding for multiple samplers used in the optimization.
 
             .. seealso::
                 See parameter ``seed`` in :class:`~optuna.samplers.QMCSampler`.
@@ -153,19 +148,9 @@ class QMCSampler(BaseSampler):
         scramble: bool = False,  # default is False for simplicity in distributed environment.
         seed: Optional[int] = None,
         independent_sampler: Optional[BaseSampler] = None,
-        warn_asyncronous_seeding: bool = True,
+        warn_asynchronous_seeding: bool = True,
         warn_independent_sampling: bool = True,
     ) -> None:
-
-        version = sys.version_info
-        if version < (3, 7, 0):
-            version_txt = str(version[0]) + "." + str(version[1]) + "." + str(version[2])
-            message = (
-                f"`QMCSampler` is not supported for Python {version_txt}. "
-                "Consider using Python 3.7 or later."
-            )
-            raise ValueError(message)
-
         self._scramble = scramble
         self._seed = seed or np.random.PCG64().random_raw()
         self._independent_sampler = independent_sampler or optuna.samplers.RandomSampler(seed=seed)
@@ -181,12 +166,11 @@ class QMCSampler(BaseSampler):
             )
             raise ValueError(message)
 
-        if seed is None and scramble and warn_asyncronous_seeding:
+        if seed is None and scramble and warn_asynchronous_seeding:
             # Sobol/Halton sequences without scrambling do not use seed.
-            self._log_asyncronous_seeding()
+            self._log_asynchronous_seeding()
 
     def reseed_rng(self) -> None:
-
         # We must not reseed the `self._seed` like below. Otherwise, workers will have different
         # seed under parallel execution because `self.reseed_rng()` is called when starting each
         # parallel executor.
@@ -197,7 +181,6 @@ class QMCSampler(BaseSampler):
     def infer_relative_search_space(
         self, study: Study, trial: FrozenTrial
     ) -> Dict[str, BaseDistribution]:
-
         if self._initial_search_space is not None:
             return self._initial_search_space
 
@@ -212,7 +195,6 @@ class QMCSampler(BaseSampler):
         return self._initial_search_space
 
     def _infer_initial_search_space(self, trial: FrozenTrial) -> Dict[str, BaseDistribution]:
-
         search_space: Dict[str, BaseDistribution] = {}
         for param_name, distribution in trial.distributions.items():
             if isinstance(distribution, CategoricalDistribution):
@@ -222,7 +204,7 @@ class QMCSampler(BaseSampler):
         return search_space
 
     @staticmethod
-    def _log_asyncronous_seeding() -> None:
+    def _log_asynchronous_seeding() -> None:
         _logger.warning(
             "No seed is provided for `QMCSampler` and the seed is set randomly. "
             "If you are running multiple `QMCSampler`s in parallel and/or distributed "
@@ -248,7 +230,6 @@ class QMCSampler(BaseSampler):
         param_name: str,
         param_distribution: BaseDistribution,
     ) -> Any:
-
         if self._initial_search_space is not None:
             if self._warn_independent_sampling:
                 self._log_independent_sampling(trial, param_name)
@@ -260,7 +241,6 @@ class QMCSampler(BaseSampler):
     def sample_relative(
         self, study: Study, trial: FrozenTrial, search_space: Dict[str, BaseDistribution]
     ) -> Dict[str, Any]:
-
         if search_space == {}:
             return {}
 
@@ -279,11 +259,10 @@ class QMCSampler(BaseSampler):
         self._independent_sampler.after_trial(study, trial, state, values)
 
     def _sample_qmc(self, study: Study, search_space: Dict[str, BaseDistribution]) -> np.ndarray:
-
         # Lazy import because the `scipy.stats.qmc` is slow to import.
         qmc_module = _LazyImport("scipy.stats.qmc")
 
-        sample_id = self._find_sample_id(study, search_space)
+        sample_id = self._find_sample_id(study)
         d = len(search_space)
 
         if self._qmc_type == "halton":
@@ -294,13 +273,15 @@ class QMCSampler(BaseSampler):
             raise ValueError("Invalid `qmc_type`")
 
         forward_size = sample_id  # `sample_id` starts from 0.
-        qmc_engine.fast_forward(forward_size)
+        # Skip fast_forward with forward_size==0 because Sobol doesn't support the case,
+        # and fast_forward(0) doesn't affect sampling.
+        if forward_size > 0:
+            qmc_engine.fast_forward(forward_size)
         sample = qmc_engine.random(1)
 
         return sample
 
-    def _find_sample_id(self, study: Study, search_space: Dict[str, BaseDistribution]) -> int:
-
+    def _find_sample_id(self, study: Study) -> int:
         qmc_id = ""
         qmc_id += self._qmc_type
         # Sobol/Halton sequences without scrambling do not use seed.

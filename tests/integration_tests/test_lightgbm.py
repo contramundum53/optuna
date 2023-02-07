@@ -1,14 +1,19 @@
 from functools import partial
 from unittest.mock import patch
 
-import lightgbm as lgb
 import numpy as np
 import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration.lightgbm import LightGBMPruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
 
+
+with try_import():
+    import lightgbm as lgb
+
+pytestmark = pytest.mark.integration
 
 # If `True`, `lgb.cv(..)` will be used in the test, otherwise `lgb.train(..)` will be used.
 CV_FLAGS = [False, True]
@@ -16,7 +21,6 @@ CV_FLAGS = [False, True]
 
 @pytest.mark.parametrize("cv", CV_FLAGS)
 def test_lightgbm_pruning_callback_call(cv: bool) -> None:
-
     callback_env = partial(
         lgb.callback.CallbackEnv,
         model="test",
@@ -47,7 +51,6 @@ def test_lightgbm_pruning_callback_call(cv: bool) -> None:
 
 @pytest.mark.parametrize("cv", CV_FLAGS)
 def test_lightgbm_pruning_callback(cv: bool) -> None:
-
     study = optuna.create_study(pruner=DeterministicPruner(True))
     study.optimize(partial(objective, cv=cv), n_trials=1)
     assert study.trials[0].state == optuna.trial.TrialState.PRUNED
@@ -89,7 +92,6 @@ def test_lightgbm_pruning_callback(cv: bool) -> None:
 def test_lightgbm_pruning_callback_with_interval(
     cv: bool, interval: int, num_boost_round: int
 ) -> None:
-
     study = optuna.create_study(pruner=DeterministicPruner(False))
 
     with patch("optuna.trial.Trial.report") as mock:
@@ -118,7 +120,6 @@ def test_lightgbm_pruning_callback_with_interval(
 
 @pytest.mark.parametrize("cv", CV_FLAGS)
 def test_lightgbm_pruning_callback_errors(cv: bool) -> None:
-
     # Unknown metric.
     study = optuna.create_study(pruner=DeterministicPruner(False))
     with pytest.raises(ValueError):
@@ -159,8 +160,7 @@ def objective(
     force_default_valid_names: bool = False,
     cv: bool = False,
 ) -> float:
-
-    dtrain = lgb.Dataset(np.asarray([[1.0], [2.0], [3.0]]), label=[1.0, 0.0, 1.0])
+    dtrain = lgb.Dataset(np.asarray([[1.0], [2.0], [3.0], [4.0]]), label=[1.0, 0.0, 1.0, 0.0])
     dtest = lgb.Dataset(np.asarray([[1.0]]), label=[1.0])
 
     if force_default_valid_names:
@@ -168,6 +168,7 @@ def objective(
     else:
         valid_names = [valid_name]
 
+    verbose_callback = lgb.log_evaluation()
     pruning_callback = LightGBMPruningCallback(
         trial, metric, valid_name=valid_name, report_interval=interval
     )
@@ -176,9 +177,8 @@ def objective(
             {"objective": "binary", "metric": ["auc", "binary_error"]},
             dtrain,
             num_boost_round,
-            verbose_eval=False,
             nfold=2,
-            callbacks=[pruning_callback],
+            callbacks=[verbose_callback, pruning_callback],
         )
     else:
         lgb.train(
@@ -187,7 +187,6 @@ def objective(
             num_boost_round,
             valid_sets=[dtest],
             valid_names=valid_names,
-            verbose_eval=False,
-            callbacks=[pruning_callback],
+            callbacks=[verbose_callback, pruning_callback],
         )
     return 1.0

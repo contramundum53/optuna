@@ -1,4 +1,3 @@
-import sys
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -25,39 +24,20 @@ _SEARCH_SPACE = {
 }
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-def test_python_version() -> None:
-    if sys.version_info < (3, 7, 0):
-        with pytest.raises(ValueError):
-            optuna.samplers.QMCSampler()
-
-
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 # TODO(kstoneriv3): `QMCSampler` can be initialized without this wrapper
 # Remove this after the experimental warning is removed.
-def _init_QMCSampler_without_exp_warning(**kwargs: Any) -> optuna.samplers.BaseSampler:
+def _init_QMCSampler_without_exp_warning(**kwargs: Any) -> optuna.samplers.QMCSampler:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)
         sampler = optuna.samplers.QMCSampler(**kwargs)
     return sampler
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_experimental_warning() -> None:
     with pytest.warns(optuna.exceptions.ExperimentalWarning):
         optuna.samplers.QMCSampler()
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 @pytest.mark.parametrize("qmc_type", ["sobol", "halton", "non-qmc"])
 def test_invalid_qmc_type(qmc_type: str) -> None:
     if qmc_type == "non-qmc":
@@ -67,21 +47,13 @@ def test_invalid_qmc_type(qmc_type: str) -> None:
         _init_QMCSampler_without_exp_warning(qmc_type=qmc_type)
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_initial_seeding() -> None:
-    with patch.object(optuna.samplers.QMCSampler, "_log_asyncronous_seeding") as mock_log_async:
+    with patch.object(optuna.samplers.QMCSampler, "_log_asynchronous_seeding") as mock_log_async:
         sampler = _init_QMCSampler_without_exp_warning(scramble=True)
     mock_log_async.assert_called_once()
     assert isinstance(sampler._seed, int)
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_infer_relative_search_space() -> None:
     def objective(trial: Trial) -> float:
         ret: float = trial.suggest_int("x1", 0, 10)
@@ -108,10 +80,6 @@ def test_infer_relative_search_space() -> None:
     assert sampler.infer_relative_search_space(study, trial) == new_search_space
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_infer_initial_search_space() -> None:
     trial = Mock()
     sampler = _init_QMCSampler_without_exp_warning()
@@ -127,19 +95,13 @@ def test_infer_initial_search_space() -> None:
     assert initial_search_space == search_space
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_sample_independent() -> None:
-
-    objective: Callable[[Trial], Any] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
+    objective: Callable[[Trial], float] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
     independent_sampler = optuna.samplers.RandomSampler()
 
     with patch.object(
         independent_sampler, "sample_independent", wraps=independent_sampler.sample_independent
     ) as mock_sample_indep:
-
         sampler = _init_QMCSampler_without_exp_warning(independent_sampler=independent_sampler)
         study = optuna.create_study(sampler=sampler)
         study.optimize(objective, n_trials=1)
@@ -156,20 +118,15 @@ def test_sample_independent() -> None:
         assert mock_sample_indep.call_count == 3
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
-def test_warn_asyncronous_seeding() -> None:
+def test_warn_asynchronous_seeding() -> None:
     # Relative sampling of `QMCSampler` does not support categorical distribution.
     # Thus, `independent_sampler.sample_independent` is called twice.
     # '_log_independent_sampling is not called in the first trial so called once in total.
-    objective: Callable[[Trial], Any] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
+    objective: Callable[[Trial], float] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
 
-    with patch.object(optuna.samplers.QMCSampler, "_log_asyncronous_seeding") as mock_log_async:
-
+    with patch.object(optuna.samplers.QMCSampler, "_log_asynchronous_seeding") as mock_log_async:
         sampler = _init_QMCSampler_without_exp_warning(
-            scramble=True, warn_asyncronous_seeding=False
+            scramble=True, warn_asynchronous_seeding=False
         )
         study = optuna.create_study(sampler=sampler)
         study.optimize(objective, n_trials=2)
@@ -183,18 +140,13 @@ def test_warn_asyncronous_seeding() -> None:
         assert mock_log_async.call_count == 1
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_warn_independent_sampling() -> None:
     # Relative sampling of `QMCSampler` does not support categorical distribution.
     # Thus, `independent_sampler.sample_independent` is called twice.
     # '_log_independent_sampling is not called in the first trial so called once in total.
-    objective: Callable[[Trial], Any] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
+    objective: Callable[[Trial], float] = lambda t: t.suggest_categorical("x", [1.0, 2.0])
 
     with patch.object(optuna.samplers.QMCSampler, "_log_independent_sampling") as mock_log_indep:
-
         sampler = _init_QMCSampler_without_exp_warning(warn_independent_sampling=False)
         study = optuna.create_study(sampler=sampler)
         study.optimize(objective, n_trials=2)
@@ -208,10 +160,6 @@ def test_warn_independent_sampling() -> None:
         assert mock_log_indep.call_count == 1
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_sample_relative() -> None:
     search_space = _SEARCH_SPACE.copy()
     search_space.pop("x6")
@@ -235,13 +183,11 @@ def test_sample_relative() -> None:
     assert sampler.sample_relative(study, trial, {}) == {}
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_sample_relative_halton() -> None:
     n, d = 8, 5
-    search_space = {f"x{i}": optuna.distributions.FloatDistribution(0, 1) for i in range(d)}
+    search_space: Dict[str, BaseDistribution] = {
+        f"x{i}": optuna.distributions.FloatDistribution(0, 1) for i in range(d)
+    }
     sampler = _init_QMCSampler_without_exp_warning(scramble=False, qmc_type="halton")
     study = optuna.create_study(sampler=sampler)
     trial = Mock()
@@ -267,13 +213,11 @@ def test_sample_relative_halton() -> None:
     np.testing.assert_allclose(samples, ref_samples, rtol=1e-6)
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_sample_relative_sobol() -> None:
     n, d = 8, 5
-    search_space = {f"x{i}": optuna.distributions.FloatDistribution(0, 1) for i in range(d)}
+    search_space: Dict[str, BaseDistribution] = {
+        f"x{i}": optuna.distributions.FloatDistribution(0, 1) for i in range(d)
+    }
     sampler = _init_QMCSampler_without_exp_warning(scramble=False, qmc_type="sobol")
     study = optuna.create_study(sampler=sampler)
     trial = Mock()
@@ -300,10 +244,6 @@ def test_sample_relative_sobol() -> None:
     np.testing.assert_allclose(samples, ref_samples, rtol=1e-6)
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 @pytest.mark.parametrize("scramble", [True, False])
 @pytest.mark.parametrize("qmc_type", ["sobol", "halton"])
 def test_sample_relative_seeding(scramble: bool, qmc_type: str) -> None:
@@ -350,10 +290,6 @@ def test_sample_relative_seeding(scramble: bool, qmc_type: str) -> None:
         ), f"v: {v} of values: {values} is not included in values_parallel: {values_parallel}."
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_call_after_trial() -> None:
     sampler = _init_QMCSampler_without_exp_warning()
     study = optuna.create_study(sampler=sampler)
@@ -364,13 +300,8 @@ def test_call_after_trial() -> None:
         assert mock_object.call_count == 1
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 @pytest.mark.parametrize("qmc_type", ["sobol", "halton"])
 def test_sample_qmc(qmc_type: str) -> None:
-
     sampler = _init_QMCSampler_without_exp_warning(qmc_type=qmc_type)
     study = Mock()
     search_space = _SEARCH_SPACE.copy()
@@ -382,26 +313,20 @@ def test_sample_qmc(qmc_type: str) -> None:
         assert sample.shape == (1, 5)
 
 
-# TODO(kstoneriv3): Remove this after the support for Python 3.6 is stopped.
-@pytest.mark.skipif(
-    sys.version_info < (3, 7, 0), reason="QMCSampler is not supported in Python 3.6"
-)
 def test_find_sample_id() -> None:
-
-    search_space = _SEARCH_SPACE.copy()
     sampler = _init_QMCSampler_without_exp_warning(qmc_type="halton", seed=0)
     study = optuna.create_study()
     for i in range(5):
-        assert sampler._find_sample_id(study, search_space) == i
+        assert sampler._find_sample_id(study) == i
 
     # Change seed but without scramble. The hash should remain the same.
     with patch.object(sampler, "_seed", 1) as _:
-        assert sampler._find_sample_id(study, search_space) == 5
+        assert sampler._find_sample_id(study) == 5
 
         # Seed is considered only when scrambling is enabled
         with patch.object(sampler, "_scramble", True) as _:
-            assert sampler._find_sample_id(study, search_space) == 0
+            assert sampler._find_sample_id(study) == 0
 
     # Change qmc_type
     with patch.object(sampler, "_qmc_type", "sobol") as _:
-        assert sampler._find_sample_id(study, search_space) == 0
+        assert sampler._find_sample_id(study) == 0

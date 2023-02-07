@@ -9,6 +9,7 @@ import warnings
 
 import optuna
 from optuna import TrialPruned
+from optuna._experimental import experimental_class
 from optuna._imports import try_import
 from optuna.integration.allennlp._environment import _environment_variables
 from optuna.integration.allennlp._variables import _VariableManager
@@ -67,6 +68,7 @@ def _fetch_pruner_config(trial: optuna.Trial) -> Dict[str, Any]:
     return kwargs
 
 
+@experimental_class("1.4.0")
 class AllenNLPExecutor:
     """AllenNLP extension to use optuna with Jsonnet config file.
 
@@ -149,9 +151,6 @@ class AllenNLPExecutor:
         if isinstance(storage, optuna.storages.RDBStorage):
             url = storage.url
 
-        elif isinstance(storage, optuna.storages.RedisStorage):
-            url = storage._url
-
         elif isinstance(storage, optuna.storages._CachedStorage):
             assert isinstance(storage._backend, optuna.storages.RDBStorage)
             url = storage._backend.url
@@ -210,7 +209,6 @@ class AllenNLPExecutor:
         params = allennlp.common.params.Params(self._build_params())
 
         if "distributed" in params:
-
             if OPTUNA_ALLENNLP_DISTRIBUTED_FLAG in os.environ:
                 warnings.warn(
                     "Other process may already exists."

@@ -12,15 +12,16 @@ import optuna
 from optuna.integration import WeightsAndBiasesCallback
 
 
-def _objective_func(trial: optuna.trial.Trial) -> float:
+pytestmark = pytest.mark.integration
 
+
+def _objective_func(trial: optuna.trial.Trial) -> float:
     x = trial.suggest_float("x", low=-10, high=10)
     y = trial.suggest_float("y", low=1, high=10, log=True)
     return (x - 2) ** 2 + (y - 25) ** 2
 
 
 def _multiobjective_func(trial: optuna.trial.Trial) -> Tuple[float, float]:
-
     x = trial.suggest_float("x", low=-10, high=10)
     y = trial.suggest_float("y", low=1, high=10, log=True)
     first_objective = (x - 2) ** 2 + (y - 25) ** 2
@@ -31,7 +32,6 @@ def _multiobjective_func(trial: optuna.trial.Trial) -> Tuple[float, float]:
 
 @mock.patch("optuna.integration.wandb.wandb")
 def test_run_initialized(wandb: mock.MagicMock) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     n_trials = 10
@@ -56,7 +56,7 @@ def test_run_initialized(wandb: mock.MagicMock) -> None:
     study = optuna.create_study(direction="minimize")
     _wrapped_func = wandbc.track_in_wandb()(lambda t: 1.0)
     wandb.init.reset_mock()
-    trial = optuna.create_trial(value=1.0)
+    trial = study.ask()
     _wrapped_func(trial)
 
     wandb.init.assert_called_once_with(
@@ -79,7 +79,6 @@ def test_run_initialized(wandb: mock.MagicMock) -> None:
 @mock.patch("optuna.integration.wandb.wandb")
 @pytest.mark.parametrize("as_multirun", [True, False])
 def test_attributes_set_on_epoch(wandb: mock.MagicMock, as_multirun: bool) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     expected_config: Dict[str, Any] = {"direction": ["MINIMIZE"]}
@@ -104,7 +103,6 @@ def test_attributes_set_on_epoch(wandb: mock.MagicMock, as_multirun: bool) -> No
 @mock.patch("optuna.integration.wandb.wandb")
 @pytest.mark.parametrize("as_multirun", [True, False])
 def test_multiobjective_attributes_set_on_epoch(wandb: mock.MagicMock, as_multirun: bool) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     expected_config: Dict[str, Any] = {"direction": ["MINIMIZE", "MAXIMIZE"]}
@@ -128,7 +126,6 @@ def test_multiobjective_attributes_set_on_epoch(wandb: mock.MagicMock, as_multir
 
 @mock.patch("optuna.integration.wandb.wandb")
 def test_log_api_call_count(wandb: mock.MagicMock) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     study = optuna.create_study()
@@ -188,7 +185,6 @@ def test_values_registered_on_epoch(
 def test_values_registered_on_epoch_with_logging(
     wandb: mock.MagicMock, metric: str, expected: List[str]
 ) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     study = optuna.create_study()
@@ -200,7 +196,7 @@ def test_values_registered_on_epoch_with_logging(
         wandb.run.log({"result": result})
         return result
 
-    study.enqueue_trial({"x": 2, "y": 25})
+    study.enqueue_trial({"x": 2, "y": 3})
     study.optimize(_decorated_objective, n_trials=1, callbacks=[wandbc])
 
     logged_in_decorator = wandb.run.log.mock_calls[0][1][0]
@@ -260,7 +256,6 @@ def test_multiobjective_values_registered_on_epoch(
 def test_multiobjective_values_registered_on_epoch_with_logging(
     wandb: mock.MagicMock, metrics: Union[str, Sequence[str]], expected: List[str]
 ) -> None:
-
     wandbc = WeightsAndBiasesCallback(as_multirun=True, metric_name=metrics)
 
     @wandbc.track_in_wandb()
@@ -270,7 +265,7 @@ def test_multiobjective_values_registered_on_epoch_with_logging(
         return result0, result1
 
     study = optuna.create_study(directions=["minimize", "maximize"])
-    study.enqueue_trial({"x": 2, "y": 24})
+    study.enqueue_trial({"x": 2, "y": 3})
     study.optimize(_decorated_objective, n_trials=1, callbacks=[wandbc])
 
     logged_in_decorator = wandb.run.log.mock_calls[0][1][0]
@@ -287,7 +282,6 @@ def test_multiobjective_values_registered_on_epoch_with_logging(
 @pytest.mark.parametrize("metrics", [["foo"], ["foo", "bar", "baz"]])
 @mock.patch("optuna.integration.wandb.wandb")
 def test_multiobjective_raises_on_name_mismatch(wandb: mock.MagicMock, metrics: List[str]) -> None:
-
     wandb.sdk.wandb_run.Run = mock.MagicMock
 
     study = optuna.create_study(directions=["minimize", "maximize"])
@@ -295,10 +289,3 @@ def test_multiobjective_raises_on_name_mismatch(wandb: mock.MagicMock, metrics: 
 
     with pytest.raises(ValueError):
         study.optimize(_multiobjective_func, n_trials=1, callbacks=[wandbc])
-
-
-@pytest.mark.parametrize("metrics", [{0: "foo", 1: "bar"}])
-def test_multiobjective_raises_on_type_mismatch(metrics: Any) -> None:
-
-    with pytest.raises(TypeError):
-        WeightsAndBiasesCallback(metric_name=metrics)

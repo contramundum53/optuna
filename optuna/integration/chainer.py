@@ -7,11 +7,11 @@ import optuna
 with optuna._imports.try_import() as _imports:
     import chainer
     from chainer.training.extension import Extension
-    from chainer.training.triggers import IntervalTrigger
-    from chainer.training.triggers import ManualScheduleTrigger
+    from chainer.training.triggers import IntervalTrigger  # type: ignore[attr-defined]
+    from chainer.training.triggers import ManualScheduleTrigger  # type: ignore[attr-defined]
 
 if not _imports.is_successful():
-    Extension = object  # NOQA
+    Extension = object  # type: ignore[assignment, misc]  # NOQA
 
 
 class ChainerPruningExtension(Extension):
@@ -49,12 +49,13 @@ class ChainerPruningExtension(Extension):
         observation_key: str,
         pruner_trigger: Union[Tuple[(int, str)], "IntervalTrigger", "ManualScheduleTrigger"],
     ) -> None:
-
         _imports.check()
 
         self._trial = trial
         self._observation_key = observation_key
-        self._pruner_trigger = chainer.training.get_trigger(pruner_trigger)
+        self._pruner_trigger = chainer.training.get_trigger(  # type: ignore[attr-defined]
+            pruner_trigger
+        )
         if not isinstance(self._pruner_trigger, (IntervalTrigger, ManualScheduleTrigger)):
             pruner_type = type(self._pruner_trigger)
             raise TypeError(
@@ -64,29 +65,28 @@ class ChainerPruningExtension(Extension):
             )
 
     @staticmethod
-    def _get_float_value(observation_value: Union[float, "chainer.Variable"]) -> float:
-
+    def _get_float_value(
+        observation_value: Union[float, "chainer.Variable"]  # type: ignore[name-defined]
+    ) -> float:
         _imports.check()
 
-        if isinstance(observation_value, chainer.Variable):
-            observation_value = observation_value.data
-
         try:
-            observation_value = float(observation_value)
+            if isinstance(observation_value, chainer.Variable):  # type: ignore[attr-defined]
+                return float(observation_value.data)
+            else:
+                return float(observation_value)
         except TypeError:
             raise TypeError(
                 "Type of observation value is not supported by ChainerPruningExtension.\n"
                 "{} cannot be cast to float.".format(type(observation_value))
             ) from None
 
-        return observation_value
-
-    def _observation_exists(self, trainer: "chainer.training.Trainer") -> bool:
-
+    def _observation_exists(
+        self, trainer: "chainer.training.Trainer"  # type: ignore[name-defined]
+    ) -> bool:
         return self._pruner_trigger(trainer) and self._observation_key in trainer.observation
 
-    def __call__(self, trainer: "chainer.training.Trainer") -> None:
-
+    def __call__(self, trainer: "chainer.training.Trainer") -> None:  # type: ignore[name-defined]
         if not self._observation_exists(trainer):
             return
 

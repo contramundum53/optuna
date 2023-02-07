@@ -7,6 +7,7 @@ from typing import Any
 from typing import Dict
 from typing import Optional
 from unittest.mock import patch
+import warnings
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +23,7 @@ from optuna.storages._rdb.models import SCHEMA_VERSION
 from optuna.storages._rdb.models import TrialHeartbeatModel
 from optuna.storages._rdb.models import VersionInfoModel
 from optuna.storages._rdb.storage import _create_scoped_session
-from optuna.testing.storage import StorageSupplier
+from optuna.testing.storages import StorageSupplier
 from optuna.testing.threading import _TestableThread
 from optuna.trial import Trial
 
@@ -32,7 +33,6 @@ from .create_db import objective_test_upgrade_distributions
 
 
 def test_init() -> None:
-
     storage = create_test_storage()
     session = storage.scoped_session()
 
@@ -55,14 +55,12 @@ def test_init() -> None:
 
 
 def test_init_url_template() -> None:
-
     with tempfile.NamedTemporaryFile(suffix="{SCHEMA_VERSION}") as tf:
         storage = RDBStorage("sqlite:///" + tf.name)
         assert storage.engine.url.database.endswith(str(SCHEMA_VERSION))
 
 
 def test_init_url_that_contains_percent_character() -> None:
-
     # Alembic's ini file regards '%' as the special character for variable expansion.
     # We checks `RDBStorage` does not raise an error even if a storage url contains the character.
     with tempfile.NamedTemporaryFile(suffix="%") as tf:
@@ -76,7 +74,6 @@ def test_init_url_that_contains_percent_character() -> None:
 
 
 def test_init_db_module_import_error() -> None:
-
     expected_msg = (
         "Failed to import DB access module for the specified storage URL. "
         "Please install appropriate one."
@@ -88,11 +85,7 @@ def test_init_db_module_import_error() -> None:
 
 
 def test_engine_kwargs() -> None:
-
     create_test_storage(engine_kwargs={"pool_size": 5})
-
-    with pytest.raises(TypeError):
-        create_test_storage(engine_kwargs={"wrong_key": "wrong_value"})
 
 
 @pytest.mark.parametrize(
@@ -108,13 +101,11 @@ def test_engine_kwargs() -> None:
 def test_set_default_engine_kwargs_for_mysql(
     url: str, engine_kwargs: Dict[str, Any], expected: bool
 ) -> None:
-
     RDBStorage._set_default_engine_kwargs_for_mysql(url, engine_kwargs)
     assert engine_kwargs["pool_pre_ping"] is expected
 
 
 def test_set_default_engine_kwargs_for_mysql_with_other_rdb() -> None:
-
     # Do not change engine_kwargs if database is not MySQL.
     engine_kwargs: Dict[str, Any] = {}
     RDBStorage._set_default_engine_kwargs_for_mysql("sqlite:///example.db", engine_kwargs)
@@ -124,7 +115,6 @@ def test_set_default_engine_kwargs_for_mysql_with_other_rdb() -> None:
 
 
 def test_check_table_schema_compatibility() -> None:
-
     storage = create_test_storage()
     session = storage.scoped_session()
 
@@ -138,20 +128,19 @@ def test_check_table_schema_compatibility() -> None:
 
     storage._version_manager.check_table_schema_compatibility()
 
-    # TODO(ohta): Remove the following comment out when the second revision is introduced.
-    # with pytest.raises(RuntimeError):
-    #     storage._set_alembic_revision(storage._version_manager._get_base_version())
-    #     storage._check_table_schema_compatibility()
+    with pytest.raises(RuntimeError):
+        storage._version_manager._set_alembic_revision(
+            storage._version_manager._get_base_version()
+        )
+        storage._version_manager.check_table_schema_compatibility()
 
 
 def create_test_storage(engine_kwargs: Optional[Dict[str, Any]] = None) -> RDBStorage:
-
     storage = RDBStorage("sqlite:///:memory:", engine_kwargs=engine_kwargs)
     return storage
 
 
 def test_create_scoped_session() -> None:
-
     storage = create_test_storage()
 
     # This object violates the unique constraint of version_info_id.
@@ -162,7 +151,6 @@ def test_create_scoped_session() -> None:
 
 
 def test_upgrade_identity() -> None:
-
     storage = create_test_storage()
 
     # `upgrade()` has no effect because the storage version is already up-to-date.
@@ -198,7 +186,9 @@ def test_upgrade_single_objective_optimization(optuna_version: str) -> None:
         storage = RDBStorage(storage_url, skip_compatibility_check=True, skip_table_creation=True)
         assert storage.get_current_version() == f"v{optuna_version}"
         head_version = storage.get_head_version()
-        storage.upgrade()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            storage.upgrade()
         assert head_version == storage.get_current_version()
 
         # Create a new study.
@@ -219,7 +209,6 @@ def test_upgrade_single_objective_optimization(optuna_version: str) -> None:
         study.optimize(objective_test_upgrade, n_trials=1)
         assert len(study.trials) == 2
         for trial in study.trials:
-            assert trial.system_attrs["a"] == 0
             assert trial.user_attrs["b"] == 1
             assert trial.intermediate_values[0] == 0.5
             assert -5 <= trial.params["x"] <= 5
@@ -227,7 +216,6 @@ def test_upgrade_single_objective_optimization(optuna_version: str) -> None:
             assert trial.params["z"] in (-5, 0, 5)
             assert trial.value is not None and 0 <= trial.value <= 150
 
-        assert study.system_attrs["c"] == 2
         assert study.user_attrs["d"] == 3
 
 
@@ -245,7 +233,9 @@ def test_upgrade_multi_objective_optimization(optuna_version: str) -> None:
         storage = RDBStorage(storage_url, skip_compatibility_check=True, skip_table_creation=True)
         assert storage.get_current_version() == f"v{optuna_version}"
         head_version = storage.get_head_version()
-        storage.upgrade()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            storage.upgrade()
         assert head_version == storage.get_current_version()
 
         # Create a new study.
@@ -266,14 +256,12 @@ def test_upgrade_multi_objective_optimization(optuna_version: str) -> None:
         study.optimize(mo_objective_test_upgrade, n_trials=1)
         assert len(study.trials) == 2
         for trial in study.trials:
-            assert trial.system_attrs["a"] == 0
             assert trial.user_attrs["b"] == 1
             assert -5 <= trial.params["x"] <= 5
             assert 0 <= trial.params["y"] <= 10
             assert trial.params["z"] in (-5, 0, 5)
             assert -5 <= trial.values[0] < 5
             assert 0 <= trial.values[1] <= 150
-        assert study.system_attrs["c"] == 2
         assert study.user_attrs["d"] == 3
 
 
@@ -291,7 +279,9 @@ def test_upgrade_distributions(optuna_version: str) -> None:
         storage = RDBStorage(storage_url, skip_compatibility_check=True, skip_table_creation=True)
         assert storage.get_current_version() == f"v{optuna_version}"
         head_version = storage.get_head_version()
-        storage.upgrade()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=FutureWarning)
+            storage.upgrade()
         assert head_version == storage.get_current_version()
 
         new_study = load_study(storage=storage, study_name="schema migration")
@@ -305,11 +295,12 @@ def test_upgrade_distributions(optuna_version: str) -> None:
         assert isinstance(new_distribution_dict["z"], CategoricalDistribution)
 
         # Check if Study.optimize can run on new storage.
-        new_study.optimize(objective_test_upgrade_distributions, n_trials=1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            new_study.optimize(objective_test_upgrade_distributions, n_trials=1)
 
 
 def test_record_heartbeat() -> None:
-
     heartbeat_interval = 1
     n_trials = 2
     sleep_sec = 2

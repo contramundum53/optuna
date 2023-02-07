@@ -52,7 +52,6 @@ def _check_plot_args(
     target: Optional[Callable[[FrozenTrial], float]],
     target_name: str,
 ) -> None:
-
     studies: Sequence[Study]
     if isinstance(study, Study):
         studies = [study]
@@ -72,7 +71,6 @@ def _check_plot_args(
 
 
 def _is_log_scale(trials: List[FrozenTrial], param: str) -> bool:
-
     for trial in trials:
         if param in trial.params:
             dist = trial.distributions[param]
@@ -85,7 +83,6 @@ def _is_log_scale(trials: List[FrozenTrial], param: str) -> bool:
 
 
 def _is_categorical(trials: List[FrozenTrial], param: str) -> bool:
-
     return any(
         isinstance(t.distributions[param], CategoricalDistribution)
         for t in trials
@@ -103,7 +100,6 @@ def _is_numerical(trials: List[FrozenTrial], param: str) -> bool:
 
 
 def _get_param_values(trials: List[FrozenTrial], p_name: str) -> List[Any]:
-
     values = [t.params[p_name] for t in trials if p_name in t.params]
     if _is_numerical(trials, p_name):
         return values
@@ -116,7 +112,7 @@ def _get_skipped_trial_numbers(
     """Utility function for ``plot_parallel_coordinate``.
 
     If trial's parameters do not contain a parameter in ``used_param_names``,
-    ``plot_parallel_coordinate`` methods do not use such trails.
+    ``plot_parallel_coordinate`` methods do not use such trials.
 
     Args:
         trials:
@@ -142,10 +138,9 @@ def _filter_nonfinite(
     target: Optional[Callable[[FrozenTrial], float]] = None,
     with_message: bool = True,
 ) -> List[FrozenTrial]:
-
     # For multi-objective optimization target must be specified to select
     # one of objective values to filter trials by (and plot by later on).
-    # This function is not raising when target is missing, sice we're
+    # This function is not raising when target is missing, since we're
     # assuming plot args have been sanitized before.
     if target is None:
 
@@ -156,8 +151,21 @@ def _filter_nonfinite(
 
     filtered_trials: List[FrozenTrial] = []
     for trial in trials:
+        value = target(trial)
+
+        try:
+            value = float(value)
+        except (
+            ValueError,
+            TypeError,
+        ):
+            warnings.warn(
+                f"Trial{trial.number}'s target value {repr(value)} could not be cast to float."
+            )
+            raise
+
         # Not a Number, positive infinity and negative infinity are considered to be non-finite.
-        if not np.isfinite(target(trial)):
+        if not np.isfinite(value):
             if with_message:
                 _logger.warning(
                     f"Trial {trial.number} is omitted in visualization "
@@ -170,5 +178,4 @@ def _filter_nonfinite(
 
 
 def _is_reverse_scale(study: Study, target: Optional[Callable[[FrozenTrial], float]]) -> bool:
-
     return target is not None or study.direction == StudyDirection.MINIMIZE

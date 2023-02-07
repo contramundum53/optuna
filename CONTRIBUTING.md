@@ -8,7 +8,7 @@ We want to
 - implement features that make what you want to do possible and/or easy.
 - write more tutorials and [examples](https://github.com/optuna/optuna-examples) that help you get familiar with Optuna.
 - make issues and pull requests on GitHub fruitful.
-- have more conversations and discussions on Gitter.
+- have more conversations and discussions on [GitHub Discussions](https://github.com/optuna/optuna/discussions).
 
 We need your help and everything about Optuna you have in your mind pushes this project forward.
 Join Us!
@@ -23,18 +23,26 @@ If you feel like giving a hand, here are some ways:
 - Fix/Improve documentation
     - Documentation gets outdated easily and can always be better, so feel free to fix and improve
 - Let us and the Optuna community know your ideas and thoughts.
-    - __Contribution to Optuna includes not only sending pull requests, but also writing down your comments on issues and pull requests by others, and joining conversations/discussions on [Gitter](https://gitter.im/optuna/optuna).__
+    - __Contribution to Optuna includes not only sending pull requests, but also writing down your comments on issues and pull requests by others, and joining conversations/discussions on [GitHub Discussions](https://github.com/optuna/optuna/discussions).__
     - Also, sharing how you enjoy Optuna is a huge contribution! If you write a blog, let us know about it!
 
-If you write code, we have some conventions as follows.
 
-- [Guidelines](#guidelines)
+## Pull Request Guidelines
+
+If you make a pull request, please follow the guidelines below:
+
+- [Setup Optuna](#setup-optuna)
+- [Checking the Format, Coding Style, and Type Hints](#checking-the-format-coding-style-and-type-hints)
+- [Documentation](#documentation)
 - [Unit Tests](#unit-tests)
 - [Continuous Integration and Local Verification](#continuous-integration-and-local-verification)
 - [Creating a Pull Request](#creating-a-pull-request)
-- [Learning Optuna's Implementation](#learning-optunas-implementation)
 
-## Guidelines
+Detailed conventions and policies to write, test, and maintain Optuna code are described in the [Optuna Wiki](https://github.com/optuna/optuna/wiki).
+
+- [Coding Style Conventions](https://github.com/optuna/optuna/wiki/Coding-Style-Conventions)
+- [Deprecation Policy](https://github.com/optuna/optuna/wiki/Deprecation-policy)
+- [Test Policy](https://github.com/optuna/optuna/wiki/Test-Policy)
 
 ### Setup Optuna
 
@@ -60,15 +68,7 @@ Type hints, [PEP484](https://www.python.org/dev/peps/pep-0484/), are checked wit
 You can check the format, coding style, and type hints at the same time just by executing a script `formats.sh`.
 If your environment is missing some dependencies such as black, blackdoc, flake8, isort or mypy,
 you will be asked to install them.
-
-You can also check them using [tox](https://tox.readthedocs.io/en/latest/) like below.
-
-```
-$ pip install tox
-$ tox -e flake8 -e black -e blackdoc -e isort -e mypy
-```
-
-If you catch format errors, you can automatically fix them by auto-formatters.
+The following commands automatically fix format errors by auto-formatters.
 
 ```bash
 # Install auto-formatters.
@@ -118,7 +118,7 @@ Optuna depends on Sphinx to build the documentation HTML files from the correspo
 but as you may notice, [Tutorial directory](https://github.com/optuna/optuna/tree/master/tutorial) does not have any `.rst` files. Instead, it has a bunch of Python (`.py`) files.
 We have [Sphinx Gallery](https://sphinx-gallery.github.io/stable/index.html) that executes those `.py` files and generates `.rst` files with standard outputs from them and corresponding Jupyter Notebook (`.ipynb`) files.
 These generated `.rst` and `.ipynb` files are written to the docs/source/tutorial directory.
-The output directory (docs/source/tutorial) and source (tutorial) directory are configured in [`sphinx_gallery_conf ` of docs/source/conf.py](https://github.com/optuna/optuna/blob/2e14273cab87f13edeb9d804a43bd63c44703cb5/docs/source/conf.py#L189-L199). These generated `.rst` files are handled by Sphinx like the other `.rst` files. The generated `.ipynb` files are hosted on Optuna’s documentation page and downloadable (check [Optuna tutorial](https://optuna.readthedocs.io/en/stable/tutorial/index.html)).
+The output directory (docs/source/tutorial) and source (tutorial) directory are configured in [`sphinx_gallery_conf` of docs/source/conf.py](https://github.com/optuna/optuna/blob/2e14273cab87f13edeb9d804a43bd63c44703cb5/docs/source/conf.py#L189-L199). These generated `.rst` files are handled by Sphinx like the other `.rst` files. The generated `.ipynb` files are hosted on Optuna’s documentation page and downloadable (check [Optuna tutorial](https://optuna.readthedocs.io/en/stable/tutorial/index.html)).
 
 The order of contents on [tutorial top page](https://optuna.readthedocs.io/en/stable/tutorial/index.html) is determined by two keys: one is the subdirectory name of tutorial and the other is the filename (note that there are some alternatives as documented in [Sphinx Gallery - sorting](https://sphinx-gallery.github.io/stable/gen_modules/sphinx_gallery.sorting.html?highlight=filenamesortkey), but we chose this key in https://github.com/optuna/optuna/blob/2e14273cab87f13edeb9d804a43bd63c44703cb5/docs/source/conf.py#L196).
 Optuna’s tutorial directory has two directories: (1) [10_key_features](https://github.com/optuna/optuna/tree/master/tutorial/10_key_features), which is meant to be aligned with and explain the key features listed on [README.md](https://github.com/optuna/optuna#key-features) and (2) [20_recipes](https://github.com/optuna/optuna/tree/master/tutorial/20_recipes), whose contents showcase how to use Optuna features conveniently.
@@ -131,7 +131,7 @@ Two specific conventions and limitations for Optuna tutorials:
 2. Execution time of the new content needs to be less than three minutes. This limitation derives from Read The Docs. If your content runs some hyperparameter optimization, set the `timeout` to 180 or less. You can check this limitation on [Read the Docs - Build Process](https://docs.readthedocs.io/en/stable/builds.html).
 
 
-## Unit Tests
+### Unit Tests
 
 When adding a new feature or fixing a bug, you also need to write sufficient test code.
 We use [pytest](https://pytest.org/) as the testing framework and
@@ -159,20 +159,17 @@ pytest tests/${TARGET_TEST_FILE_NAME}
 pytest tests/${TARGET_TEST_FILE_NAME} -k ${TARGET_TEST_FUNCTION_NAME}
 ```
 
-## Continuous Integration and Local Verification
+See also the [Optuna Test Policy](https://github.com/optuna/optuna/wiki/Test-Policy), which describes the principles to write and maintain Optuna tests to meet certain quality requirements.
 
-Optuna repository uses GitHub Actions and CircleCI.
+### Continuous Integration and Local Verification
 
-Currently, we are migrating to GitHub Actions but still we use CircleCI for testing `document`
-because it makes it much easier to check built documentation.
+Optuna repository uses GitHub Actions.
 
-## Creating a Pull Request
+### Creating a Pull Request
 
-When you are ready to create a pull request, please try to keep the following in mind:
+When you are ready to create a pull request, please try to keep the following in mind.
 
-### Title
-
-The title of your pull request should
+First, the **title** of your pull request should:
 
 - briefly describe and reflect the changes
 - wrap any code with backticks
@@ -180,13 +177,11 @@ The title of your pull request should
 
 *The title will be directly visible in the release notes.*
 
-#### Example
+For example:
 
-Introduces Tree-structured Parzen Estimator to `optuna.samplers`
+- Introduces Tree-structured Parzen Estimator to `optuna.samplers`
 
-### Description
-
-The description of your pull request should
+Second, the **description** of your pull request should:
 
 - describe the motivation
 - describe the changes

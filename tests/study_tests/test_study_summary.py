@@ -3,17 +3,17 @@ import copy
 import pytest
 
 from optuna import create_study
+from optuna import get_all_study_summaries
 from optuna.storages import RDBStorage
 
 
 def test_study_summary_eq_ne() -> None:
-
     storage = RDBStorage("sqlite:///:memory:")
 
     create_study(storage=storage)
     study = create_study(storage=storage)
 
-    summaries = study._storage.get_all_study_summaries(include_best_trial=True)
+    summaries = get_all_study_summaries(study._storage, include_best_trial=True)
     assert len(summaries) == 2
 
     assert summaries[0] == copy.deepcopy(summaries[0])
@@ -27,13 +27,12 @@ def test_study_summary_eq_ne() -> None:
 
 
 def test_study_summary_lt_le() -> None:
-
     storage = RDBStorage("sqlite:///:memory:")
 
     create_study(storage=storage)
     study = create_study(storage=storage)
 
-    summaries = study._storage.get_all_study_summaries(include_best_trial=True)
+    summaries = get_all_study_summaries(study._storage, include_best_trial=True)
     assert len(summaries) == 2
 
     summary_0 = summaries[0]

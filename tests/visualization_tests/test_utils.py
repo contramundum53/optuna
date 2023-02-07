@@ -7,6 +7,7 @@ from pytest import LogCaptureFixture
 import optuna
 from optuna.distributions import FloatDistribution
 from optuna.study import create_study
+from optuna.testing.visualization import prepare_study_with_trials
 from optuna.trial import create_trial
 from optuna.trial import FrozenTrial
 from optuna.trial import TrialState
@@ -17,7 +18,6 @@ from optuna.visualization._utils import _is_log_scale
 
 
 def test_is_log_scale() -> None:
-
     study = create_study()
     study.add_trial(
         create_trial(
@@ -41,7 +41,6 @@ def test_is_log_scale() -> None:
 
 
 def _is_plotly_available() -> bool:
-
     try:
         import plotly  # NOQA
 
@@ -52,12 +51,10 @@ def _is_plotly_available() -> bool:
 
 
 def test_visualization_is_available() -> None:
-
     assert is_available() == _is_plotly_available()
 
 
 def test_check_plot_args() -> None:
-
     study = create_study(directions=["minimize", "minimize"])
     with pytest.raises(ValueError):
         _check_plot_args(study, None, "Objective Value")
@@ -70,7 +67,6 @@ def test_check_plot_args() -> None:
     "value, expected", [(float("inf"), 1), (-float("inf"), 1), (float("nan"), 1), (0.0, 2)]
 )
 def test_filter_inf_trials(value: float, expected: int) -> None:
-
     study = create_study()
     study.add_trial(
         create_trial(
@@ -108,7 +104,6 @@ def test_filter_inf_trials(value: float, expected: int) -> None:
 def test_filter_inf_trials_multiobjective(
     value: float, objective_selected: int, expected: int
 ) -> None:
-
     study = create_study(directions=["minimize", "maximize"])
     study.add_trial(
         create_trial(
@@ -142,7 +137,6 @@ def test_filter_inf_trials_multiobjective(
 
 @pytest.mark.parametrize("with_message", [True, False])
 def test_filter_inf_trials_message(caplog: LogCaptureFixture, with_message: bool) -> None:
-
     study = create_study()
     study.add_trial(
         create_trial(
@@ -173,3 +167,11 @@ def test_filter_inf_trials_message(caplog: LogCaptureFixture, with_message: bool
         assert n_filtered_as_inf == 1
     else:
         assert msg not in caplog.text
+
+
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_filter_nonfinite_with_invalid_target() -> None:
+    study = prepare_study_with_trials()
+    trials = study.get_trials(states=(TrialState.COMPLETE,))
+    with pytest.raises(ValueError):
+        _filter_nonfinite(trials, target=lambda t: "invalid target")  # type: ignore

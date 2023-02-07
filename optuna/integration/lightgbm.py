@@ -8,16 +8,16 @@ from optuna.integration import _lightgbm_tuner as tuner
 
 
 with try_import() as _imports:
-    import lightgbm as lgb  # NOQA
-    from lightgbm.callback import CallbackEnv  # NOQA
+    import lightgbm as lgb
+    from lightgbm.callback import CallbackEnv
 
 # Attach lightgbm API.
 if _imports.is_successful():
     # To pass tests/integration_tests/lightgbm_tuner_tests/test_optimize.py.
-    from lightgbm import Dataset  # NOQA
+    from lightgbm import Dataset
 
-    from optuna.integration._lightgbm_tuner import LightGBMTuner  # NOQA
-    from optuna.integration._lightgbm_tuner import LightGBMTunerCV  # NOQA
+    from optuna.integration._lightgbm_tuner import LightGBMTuner
+    from optuna.integration._lightgbm_tuner import LightGBMTunerCV
 
     _names_from_tuners = ["train", "LGBMModel", "LGBMClassifier", "LGBMRegressor"]
 
@@ -35,6 +35,8 @@ else:
     setattr(sys.modules[__name__], "train", tuner.__dict__["train"])
     setattr(sys.modules[__name__], "LightGBMTuner", tuner.__dict__["LightGBMTuner"])
     setattr(sys.modules[__name__], "LightGBMTunerCV", tuner.__dict__["LightGBMTunerCV"])
+
+__all__ = ["Dataset", "LightGBMTuner", "LightGBMTunerCV"]
 
 
 class LightGBMPruningCallback:
@@ -78,7 +80,6 @@ class LightGBMPruningCallback:
         valid_name: str = "valid_0",
         report_interval: int = 1,
     ) -> None:
-
         _imports.check()
 
         self._trial = trial
@@ -89,7 +90,6 @@ class LightGBMPruningCallback:
     def _find_evaluation_result(
         self, target_valid_name: str, env: "CallbackEnv"
     ) -> Optional[List]:
-
         for evaluation_result in env.evaluation_result_list:
             valid_name, metric, current_score, is_higher_better = evaluation_result[:4]
             if valid_name != target_valid_name or metric != self._metric:
@@ -100,7 +100,6 @@ class LightGBMPruningCallback:
         return None
 
     def __call__(self, env: "CallbackEnv") -> None:
-
         if (env.iteration + 1) % self._report_interval == 0:
             # If this callback has been passed to `lightgbm.cv` function,
             # the value of `is_cv` becomes `True`. See also:

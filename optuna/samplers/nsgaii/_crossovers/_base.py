@@ -5,7 +5,7 @@ import numpy as np
 from optuna.study import Study
 
 
-class BaseCrossover(object, metaclass=abc.ABCMeta):
+class BaseCrossover(abc.ABC):
     """Base class for crossovers.
 
     A crossover operation is used by :class:`~optuna.samplers.NSGAIISampler`
@@ -18,7 +18,6 @@ class BaseCrossover(object, metaclass=abc.ABCMeta):
     """
 
     def __str__(self) -> str:
-
         return self.__class__.__name__
 
     @property

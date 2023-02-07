@@ -1,29 +1,38 @@
 from typing import Any
 
-import skorch
-import torch
-from torch import nn
+import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration import SkorchPruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
 
 
-class ClassifierModule(nn.Module):
+with try_import() as _imports:
+    import skorch
+    import torch
+    from torch import nn
+    from torch.nn import Module
+
+if not _imports.is_successful():
+    Module = object  # type: ignore # NOQA
+
+pytestmark = pytest.mark.integration
+
+
+class ClassifierModule(Module):
     def __init__(self) -> None:
         super().__init__()
         self.dense0 = nn.Linear(4, 8)
 
-    def forward(self, X: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    def forward(self, X: "torch.Tensor", **kwargs: Any) -> "torch.Tensor":
         return self.dense0(X)
 
 
 def test_skorch_pruning_callback() -> None:
-
     X, y = torch.zeros(5, 4), torch.zeros(5, dtype=torch.long)
 
     def objective(trial: optuna.trial.Trial) -> float:
-
         net = skorch.NeuralNetClassifier(
             ClassifierModule,
             max_epochs=10,

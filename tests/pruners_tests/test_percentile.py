@@ -1,6 +1,7 @@
 import math
 from typing import List
 from typing import Tuple
+import warnings
 
 import pytest
 
@@ -12,7 +13,6 @@ from optuna.trial import TrialState
 
 
 def test_percentile_pruner_percentile() -> None:
-
     optuna.pruners.PercentilePruner(0.0)
     optuna.pruners.PercentilePruner(25.0)
     optuna.pruners.PercentilePruner(100.0)
@@ -25,7 +25,6 @@ def test_percentile_pruner_percentile() -> None:
 
 
 def test_percentile_pruner_n_startup_trials() -> None:
-
     optuna.pruners.PercentilePruner(25.0, n_startup_trials=0)
     optuna.pruners.PercentilePruner(25.0, n_startup_trials=5)
 
@@ -34,7 +33,6 @@ def test_percentile_pruner_n_startup_trials() -> None:
 
 
 def test_percentile_pruner_n_warmup_steps() -> None:
-
     optuna.pruners.PercentilePruner(25.0, n_warmup_steps=0)
     optuna.pruners.PercentilePruner(25.0, n_warmup_steps=5)
 
@@ -43,7 +41,6 @@ def test_percentile_pruner_n_warmup_steps() -> None:
 
 
 def test_percentile_pruner_interval_steps() -> None:
-
     optuna.pruners.PercentilePruner(25.0, interval_steps=1)
     optuna.pruners.PercentilePruner(25.0, interval_steps=5)
 
@@ -55,7 +52,6 @@ def test_percentile_pruner_interval_steps() -> None:
 
 
 def test_percentile_pruner_with_one_trial() -> None:
-
     pruner = optuna.pruners.PercentilePruner(25.0, 0, 0)
     study = optuna.study.create_study(pruner=pruner)
     trial = study.ask()
@@ -71,7 +67,6 @@ def test_percentile_pruner_with_one_trial() -> None:
 def test_25_percentile_pruner_intermediate_values(
     direction_value: Tuple[str, List[float], float]
 ) -> None:
-
     direction, intermediate_values, latest_value = direction_value
     pruner = optuna.pruners.PercentilePruner(25.0, 0, 0)
     study = optuna.study.create_study(direction=direction, pruner=pruner)
@@ -90,8 +85,8 @@ def test_25_percentile_pruner_intermediate_values(
     assert trial.should_prune()
 
 
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
 def test_25_percentile_pruner_intermediate_values_nan() -> None:
-
     pruner = optuna.pruners.PercentilePruner(25.0, 0, 0)
     study = optuna.study.create_study(pruner=pruner)
 
@@ -119,7 +114,6 @@ def test_25_percentile_pruner_intermediate_values_nan() -> None:
 def test_get_best_intermediate_result_over_steps(
     direction_expected: Tuple[StudyDirection, float]
 ) -> None:
-
     direction, expected = direction_expected
 
     if direction == StudyDirection.MINIMIZE:
@@ -159,24 +153,25 @@ def test_get_best_intermediate_result_over_steps(
     trial_nan = optuna.trial.Trial(study, trial_id_nan)
     trial_nan.report(float("nan"), step=0)
     frozen_trial_nan = study._storage.get_trial(trial_id_nan)
-    assert math.isnan(
-        _percentile._get_best_intermediate_result_over_steps(frozen_trial_nan, direction)
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        assert math.isnan(
+            _percentile._get_best_intermediate_result_over_steps(frozen_trial_nan, direction)
+        )
 
 
 def test_get_percentile_intermediate_result_over_trials() -> None:
     def setup_study(trial_num: int, _intermediate_values: List[List[float]]) -> Study:
-
         _study = optuna.study.create_study(direction="minimize")
         trial_ids = [_study._storage.create_new_trial(_study._study_id) for _ in range(trial_num)]
 
         for step, values in enumerate(_intermediate_values):
-            # Study does not have any trials.
+            # Study does not have any complete trials.
             with pytest.raises(ValueError):
-                _all_trials = _study.get_trials()
+                completed_trials = _study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
                 _direction = _study.direction
                 _percentile._get_percentile_intermediate_result_over_trials(
-                    _all_trials, _direction, step, 25, 1
+                    completed_trials, _direction, step, 25, 1
                 )
 
             for i in range(trial_num):
@@ -227,15 +222,17 @@ def test_get_percentile_intermediate_result_over_trials() -> None:
     study = setup_study(9, intermediate_values)
     all_trials = study.get_trials()
     direction = study.direction
-    assert math.isnan(
-        _percentile._get_percentile_intermediate_result_over_trials(
-            all_trials, direction, 2, 75, 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        assert math.isnan(
+            _percentile._get_percentile_intermediate_result_over_trials(
+                all_trials, direction, 2, 75, 1
+            )
         )
-    )
 
-    # n_min_trials = 2
-    assert math.isnan(
-        _percentile._get_percentile_intermediate_result_over_trials(
-            all_trials, direction, 2, 75, 2
+        # n_min_trials = 2.
+        assert math.isnan(
+            _percentile._get_percentile_intermediate_result_over_trials(
+                all_trials, direction, 2, 75, 2
+            )
         )
-    )

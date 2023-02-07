@@ -28,6 +28,7 @@ class MOTPESampler(TPESampler):
 
     - `Multiobjective tree-structured parzen estimator for computationally expensive optimization
       problems <https://dl.acm.org/doi/abs/10.1145/3377930.3389817>`_
+    - `Multiobjective Tree-Structured Parzen Estimator <https://doi.org/10.1613/jair.1.13188>`_
 
     Args:
         consider_prior:
@@ -105,7 +106,6 @@ class MOTPESampler(TPESampler):
         weights_above: Callable[[int], np.ndarray] = _default_weights_above,
         seed: Optional[int] = None,
     ) -> None:
-
         super().__init__(
             consider_prior=consider_prior,
             prior_weight=prior_weight,

@@ -2,9 +2,11 @@ import copy
 import math
 import pickle
 from typing import Any
+from typing import Callable
 from typing import cast
 from typing import Dict
 from typing import List
+from typing import NamedTuple
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -12,6 +14,7 @@ from typing import Union
 import warnings
 
 from cmaes import CMA
+from cmaes import CMAwM
 from cmaes import get_warm_start_mgd
 from cmaes import SepCMA
 import numpy as np
@@ -20,6 +23,8 @@ import optuna
 from optuna import logging
 from optuna._transform import _SearchSpaceTransform
 from optuna.distributions import BaseDistribution
+from optuna.distributions import FloatDistribution
+from optuna.distributions import IntDistribution
 from optuna.exceptions import ExperimentalWarning
 from optuna.samplers import BaseSampler
 from optuna.study._study_direction import StudyDirection
@@ -34,7 +39,13 @@ _EPS = 1e-10
 _SYSTEM_ATTR_MAX_LENGTH = 2045
 
 
-CmaClass = Union[CMA, SepCMA]
+CmaClass = Union[CMA, SepCMA, CMAwM]
+
+
+class _CmaEsAttrKeys(NamedTuple):
+    optimizer: str
+    n_restarts: str
+    generation: Callable[[int], str]
 
 
 class CmaEsSampler(BaseSampler):
@@ -86,6 +97,9 @@ class CmaEsSampler(BaseSampler):
     - `Masahiro Nomura, Shuhei Watanabe, Youhei Akimoto, Yoshihiko Ozaki, Masaki Onishi.
       Warm Starting CMA-ES for Hyperparameter Optimization, AAAI. 2021.
       <https://arxiv.org/abs/2012.06932>`_
+    - `R. Hamano, S. Saito, M. Nomura, S. Shirakawa. CMA-ES with Margin: Lower-Bounding Marginal
+      Probability for Mixed-Integer Black-Box Optimization, GECCO. 2022.
+      <https://arxiv.org/abs/2205.13482>`_
 
     .. seealso::
         You can also use :class:`optuna.integration.PyCmaSampler` which is a sampler using cma
@@ -144,6 +158,10 @@ class CmaEsSampler(BaseSampler):
                 versions without prior notice. See
                 https://github.com/optuna/optuna/releases/tag/v2.1.0.
 
+        popsize:
+            A population size of CMA-ES. When set ``restart_strategy = 'ipop'``, this is used
+            as the initial population size.
+
         inc_popsize:
             Multiplier for increasing population size before each restart.
             This argument will be used when setting ``restart_strategy = 'ipop'``.
@@ -173,6 +191,18 @@ class CmaEsSampler(BaseSampler):
                 versions without prior notice. See
                 https://github.com/optuna/optuna/releases/tag/v2.6.0.
 
+        with_margin:
+            If this is :obj:`True`, CMA-ES with margin is used. This algorithm prevents samples in
+            each discrete distribution (:class:`~optuna.distributions.FloatDistribution` with
+            `step` and :class:`~optuna.distributions.IntDistribution`) from being fixed to a single
+            point.
+            Currently, this option cannot be used with ``use_separable_cma=True``.
+
+            .. note::
+                Added in v3.1.0 as an experimental feature. The interface may change in newer
+                versions without prior notice. See
+                https://github.com/optuna/optuna/releases/tag/v3.1.0.
+
         source_trials:
             This option is for Warm Starting CMA-ES, a method to transfer prior knowledge on
             similar HPO tasks through the initialization of CMA-ES. This method estimates a
@@ -198,8 +228,10 @@ class CmaEsSampler(BaseSampler):
         *,
         consider_pruned_trials: bool = False,
         restart_strategy: Optional[str] = None,
+        popsize: Optional[int] = None,
         inc_popsize: int = 2,
         use_separable_cma: bool = False,
+        with_margin: bool = False,
         source_trials: Optional[List[FrozenTrial]] = None,
     ) -> None:
         self._x0 = x0
@@ -211,8 +243,10 @@ class CmaEsSampler(BaseSampler):
         self._search_space = optuna.samplers.IntersectionSearchSpace()
         self._consider_pruned_trials = consider_pruned_trials
         self._restart_strategy = restart_strategy
+        self._popsize = popsize
         self._inc_popsize = inc_popsize
         self._use_separable_cma = use_separable_cma
+        self._with_margin = with_margin
         self._source_trials = source_trials
 
         if self._restart_strategy:
@@ -243,6 +277,13 @@ class CmaEsSampler(BaseSampler):
                 ExperimentalWarning,
             )
 
+        if self._with_margin:
+            warnings.warn(
+                "`with_margin` option is an experimental feature."
+                " The interface can change in the future.",
+                ExperimentalWarning,
+            )
+
         if source_trials is not None and (x0 is not None or sigma0 is not None):
             raise ValueError(
                 "It is prohibited to pass `source_trials` argument when "
@@ -266,6 +307,12 @@ class CmaEsSampler(BaseSampler):
                 )
             )
 
+        # TODO(knshnb): Support sep-CMA-ES with margin.
+        if self._use_separable_cma and self._with_margin:
+            raise ValueError(
+                "Currently, we do not support `use_separable_cma=True` and `with_margin=True`."
+            )
+
     def reseed_rng(self) -> None:
         # _cma_rng doesn't require reseeding because the relative sampling reseeds in each trial.
         self._independent_sampler.reseed_rng()
@@ -281,13 +328,7 @@ class CmaEsSampler(BaseSampler):
                 # `Trial`.
                 continue
 
-            if not isinstance(
-                distribution,
-                (
-                    optuna.distributions.FloatDistribution,
-                    optuna.distributions.IntDistribution,
-                ),
-            ):
+            if not isinstance(distribution, (FloatDistribution, IntDistribution)):
                 # Categorical distribution is unsupported.
                 continue
             search_space[name] = distribution
@@ -300,7 +341,6 @@ class CmaEsSampler(BaseSampler):
         trial: "optuna.trial.FrozenTrial",
         search_space: Dict[str, BaseDistribution],
     ) -> Dict[str, Any]:
-
         self._raise_error_if_multi_objective(study)
 
         if len(search_space) == 0:
@@ -320,17 +360,13 @@ class CmaEsSampler(BaseSampler):
             self._warn_independent_sampling = False
             return {}
 
-        trans = _SearchSpaceTransform(search_space)
+        # When `with_margin=True`, bounds in discrete dimensions are handled inside `CMAwM`.
+        trans = _SearchSpaceTransform(search_space, transform_step=not self._with_margin)
 
         optimizer, n_restarts = self._restore_optimizer(completed_trials)
         if optimizer is None:
             n_restarts = 0
-            optimizer = self._init_optimizer(trans, study.direction)
-
-        if self._restart_strategy is None:
-            generation_attr_key = "cma:generation"  # For backward compatibility.
-        else:
-            generation_attr_key = "cma:restart_{}:generation".format(n_restarts)
+            optimizer = self._init_optimizer(trans, study.direction, population_size=self._popsize)
 
         if optimizer.dim != len(trans.bounds):
             _logger.info(
@@ -344,16 +380,18 @@ class CmaEsSampler(BaseSampler):
 
         # TODO(c-bata): Reduce the number of wasted trials during parallel optimization.
         # See https://github.com/optuna/optuna/pull/920#discussion_r385114002 for details.
-        solution_trials = [
-            t
-            for t in completed_trials
-            if optimizer.generation == t.system_attrs.get(generation_attr_key, -1)
-        ]
+        solution_trials = self._get_solution_trials(
+            completed_trials, optimizer.generation, n_restarts
+        )
+
         if len(solution_trials) >= optimizer.population_size:
             solutions: List[Tuple[np.ndarray, float]] = []
             for t in solution_trials[: optimizer.population_size]:
                 assert t.value is not None, "completed trials must have a value"
-                x = trans.transform(t.params)
+                if isinstance(optimizer, CMAwM):
+                    x = t.system_attrs["x_for_tell"]
+                else:
+                    x = trans.transform(t.params)
                 y = t.value if study.direction == StudyDirection.MINIMIZE else -t.value
                 solutions.append((x, y))
 
@@ -361,7 +399,6 @@ class CmaEsSampler(BaseSampler):
 
             if self._restart_strategy == "ipop" and optimizer.should_stop():
                 n_restarts += 1
-                generation_attr_key = "cma:restart_{}:generation".format(n_restarts)
                 popsize = optimizer.population_size * self._inc_popsize
                 optimizer = self._init_optimizer(
                     trans, study.direction, population_size=popsize, randomize_start_point=True
@@ -369,52 +406,83 @@ class CmaEsSampler(BaseSampler):
 
             # Store optimizer.
             optimizer_str = pickle.dumps(optimizer).hex()
-            optimizer_attrs = _split_optimizer_str(optimizer_str)
+            optimizer_attrs = self._split_optimizer_str(optimizer_str)
             for key in optimizer_attrs:
                 study._storage.set_trial_system_attr(trial._trial_id, key, optimizer_attrs[key])
 
         # Caution: optimizer should update its seed value.
         seed = self._cma_rng.randint(1, 2**16) + trial.number
         optimizer._rng.seed(seed)
-        params = optimizer.ask()
+        if isinstance(optimizer, CMAwM):
+            params, x_for_tell = optimizer.ask()
+            study._storage.set_trial_system_attr(trial._trial_id, "x_for_tell", x_for_tell)
+        else:
+            params = optimizer.ask()
 
+        generation_attr_key = self._attr_keys.generation(n_restarts)
         study._storage.set_trial_system_attr(
             trial._trial_id, generation_attr_key, optimizer.generation
         )
-        study._storage.set_trial_system_attr(trial._trial_id, "cma:n_restarts", n_restarts)
+        study._storage.set_trial_system_attr(
+            trial._trial_id, self._attr_keys.n_restarts, n_restarts
+        )
 
         external_values = trans.untransform(params)
 
         return external_values
 
+    @property
+    def _attr_keys(self) -> _CmaEsAttrKeys:
+        if self._use_separable_cma:
+            attr_prefix = "sepcma:"
+        elif self._with_margin:
+            attr_prefix = "cmawm:"
+        else:
+            attr_prefix = "cma:"
+
+        def generation_attr_key_template(restart: int) -> str:
+            if self._restart_strategy is None:
+                return attr_prefix + "generation"
+            else:
+                return attr_prefix + "restart_{}:generation".format(restart)
+
+        return _CmaEsAttrKeys(
+            attr_prefix + "optimizer",
+            attr_prefix + "n_restarts",
+            generation_attr_key_template,
+        )
+
+    def _concat_optimizer_attrs(self, optimizer_attrs: Dict[str, str]) -> str:
+        return "".join(
+            optimizer_attrs["{}:{}".format(self._attr_keys.optimizer, i)]
+            for i in range(len(optimizer_attrs))
+        )
+
+    def _split_optimizer_str(self, optimizer_str: str) -> Dict[str, str]:
+        optimizer_len = len(optimizer_str)
+        attrs = {}
+        for i in range(math.ceil(optimizer_len / _SYSTEM_ATTR_MAX_LENGTH)):
+            start = i * _SYSTEM_ATTR_MAX_LENGTH
+            end = min((i + 1) * _SYSTEM_ATTR_MAX_LENGTH, optimizer_len)
+            attrs["{}:{}".format(self._attr_keys.optimizer, i)] = optimizer_str[start:end]
+        return attrs
+
     def _restore_optimizer(
         self,
         completed_trials: "List[optuna.trial.FrozenTrial]",
     ) -> Tuple[Optional[CmaClass], int]:
-        if not self._use_separable_cma:
-            attr_key_optimizer = "cma:optimizer"
-            attr_key_n_restarts = "cma:n_restarts"
-        else:
-            attr_key_optimizer = "sepcma:optimizer"
-            attr_key_n_restarts = "sepcma:n_restarts"
-
         # Restore a previous CMA object.
         for trial in reversed(completed_trials):
             optimizer_attrs = {
                 key: value
                 for key, value in trial.system_attrs.items()
-                if key.startswith(attr_key_optimizer)
+                if key.startswith(self._attr_keys.optimizer)
             }
             if len(optimizer_attrs) == 0:
                 continue
 
-            if not self._use_separable_cma and "cma:optimizer" in optimizer_attrs:
-                # Check "cma:optimizer" key for backward compatibility.
-                optimizer_str = optimizer_attrs["cma:optimizer"]
-            else:
-                optimizer_str = _concat_optimizer_attrs(optimizer_attrs)
-
-            n_restarts: int = trial.system_attrs.get(attr_key_n_restarts, 0)
+            optimizer_str = self._concat_optimizer_attrs(optimizer_attrs)
+            n_restarts: int = trial.system_attrs.get(self._attr_keys.n_restarts, 0)
             return pickle.loads(bytes.fromhex(optimizer_str)), n_restarts
         return None, 0
 
@@ -478,6 +546,24 @@ class CmaEsSampler(BaseSampler):
                 population_size=population_size,
             )
 
+        if self._with_margin:
+            steps = np.empty(len(trans._search_space), dtype=float)
+            for i, dist in enumerate(trans._search_space.values()):
+                assert isinstance(dist, (IntDistribution, FloatDistribution))
+                # Set step 0.0 for continuous search space.
+                steps[i] = dist.step or 0.0
+
+            return CMAwM(
+                mean=mean,
+                sigma=sigma0,
+                bounds=trans.bounds,
+                steps=steps,
+                cov=cov,
+                seed=self._cma_rng.randint(1, 2**31 - 2),
+                n_max_resampling=10 * n_dimension,
+                population_size=population_size,
+            )
+
         return CMA(
             mean=mean,
             sigma=sigma0,
@@ -495,7 +581,6 @@ class CmaEsSampler(BaseSampler):
         param_name: str,
         param_distribution: BaseDistribution,
     ) -> Any:
-
         self._raise_error_if_multi_objective(study)
 
         if self._warn_independent_sampling:
@@ -539,6 +624,12 @@ class CmaEsSampler(BaseSampler):
                 complete_trials.append(copied_t)
         return complete_trials
 
+    def _get_solution_trials(
+        self, trials: List[FrozenTrial], generation: int, n_restarts: int
+    ) -> List[FrozenTrial]:
+        generation_attr_key = self._attr_keys.generation(n_restarts)
+        return [t for t in trials if generation == t.system_attrs.get(generation_attr_key, -1)]
+
     def after_trial(
         self,
         study: "optuna.Study",
@@ -546,18 +637,7 @@ class CmaEsSampler(BaseSampler):
         state: TrialState,
         values: Optional[Sequence[float]],
     ) -> None:
-
         self._independent_sampler.after_trial(study, trial, state, values)
-
-
-def _split_optimizer_str(optimizer_str: str) -> Dict[str, str]:
-    optimizer_len = len(optimizer_str)
-    attrs = {}
-    for i in range(math.ceil(optimizer_len / _SYSTEM_ATTR_MAX_LENGTH)):
-        start = i * _SYSTEM_ATTR_MAX_LENGTH
-        end = min((i + 1) * _SYSTEM_ATTR_MAX_LENGTH, optimizer_len)
-        attrs["cma:optimizer:{}".format(i)] = optimizer_str[start:end]
-    return attrs
 
 
 def _is_compatible_search_space(
@@ -565,9 +645,3 @@ def _is_compatible_search_space(
 ) -> bool:
     intersection_size = len(set(trans._search_space.keys()).intersection(search_space.keys()))
     return intersection_size == len(trans._search_space) == len(search_space)
-
-
-def _concat_optimizer_attrs(optimizer_attrs: Dict[str, str]) -> str:
-    return "".join(
-        optimizer_attrs["cma:optimizer:{}".format(i)] for i in range(len(optimizer_attrs))
-    )

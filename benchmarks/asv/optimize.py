@@ -7,7 +7,7 @@ from optuna.samplers import BaseSampler
 from optuna.samplers import CmaEsSampler
 from optuna.samplers import RandomSampler
 from optuna.samplers import TPESampler
-from optuna.testing.storage import StorageSupplier
+from optuna.testing.storages import StorageSupplier
 
 
 def parse_args(args: str) -> List[Union[int, str]]:
@@ -64,9 +64,6 @@ class OptimizeSuite:
         "inmemory, cmaes, 1000",
         "sqlite, random, 1000",
         "cached_sqlite, random, 1000",
-        # Following benchmarks use fakeredis instead of Redis.
-        "redis, random, 1000",
-        "cached_redis, random, 1000",
     )
     param_names = ["storage, sampler, n_trials"]
     timeout = 600

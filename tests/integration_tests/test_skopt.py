@@ -6,13 +6,20 @@ from unittest.mock import Mock
 from unittest.mock import patch
 import warnings
 
+import _pytest.capture
 import pytest
-from skopt.space import space
 
 import optuna
 from optuna import distributions
-from optuna.testing.sampler import DeterministicRelativeSampler
+from optuna._imports import try_import
 from optuna.trial import FrozenTrial
+from optuna.trial import Trial
+
+
+with try_import():
+    from skopt.space import space
+
+pytestmark = pytest.mark.integration
 
 
 def test_consider_pruned_trials_experimental_warning() -> None:
@@ -21,7 +28,6 @@ def test_consider_pruned_trials_experimental_warning() -> None:
 
 
 def test_conversion_from_distribution_to_dimension() -> None:
-
     sampler = optuna.integration.SkoptSampler()
     study = optuna.create_study(sampler=sampler)
     with patch("skopt.Optimizer") as mock_object:
@@ -56,7 +62,6 @@ def test_conversion_from_distribution_to_dimension() -> None:
 
 
 def test_skopt_kwargs() -> None:
-
     sampler = optuna.integration.SkoptSampler(skopt_kwargs={"base_estimator": "GBRT"})
     study = optuna.create_study(sampler=sampler)
 
@@ -68,7 +73,6 @@ def test_skopt_kwargs() -> None:
 
 
 def test_skopt_kwargs_dimensions() -> None:
-
     # User specified `dimensions` argument will be ignored in `SkoptSampler`.
     sampler = optuna.integration.SkoptSampler(skopt_kwargs={"dimensions": []})
     study = optuna.create_study(sampler=sampler)
@@ -81,7 +85,6 @@ def test_skopt_kwargs_dimensions() -> None:
 
 
 def test_is_compatible() -> None:
-
     sampler = optuna.integration.SkoptSampler()
     study = optuna.create_study(sampler=sampler)
 
@@ -131,8 +134,28 @@ def test_is_compatible() -> None:
         optimizer._is_compatible(trial)
 
 
-def _objective(trial: optuna.trial.Trial) -> float:
+def test_warn_independent_sampling(capsys: _pytest.capture.CaptureFixture) -> None:
+    def objective(trial: Trial) -> float:
+        x = trial.suggest_categorical("x", ["a", "b"])
+        if x == "a":
+            return trial.suggest_float("y", 0, 1)
+        else:
+            return trial.suggest_float("z", 0, 1)
 
+    # We need to reconstruct our default handler to properly capture stderr.
+    optuna.logging._reset_library_root_logger()
+    optuna.logging.enable_default_handler()
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    sampler = optuna.integration.SkoptSampler(warn_independent_sampling=True, n_startup_trials=0)
+    study = optuna.create_study(sampler=sampler)
+    study.optimize(objective, n_trials=10)
+
+    _, err = capsys.readouterr()
+    assert err
+
+
+def _objective(trial: optuna.trial.Trial) -> float:
     p0 = trial.suggest_float("p0", -3.3, 5.2)
     p1 = trial.suggest_float("p1", 2.0, 2.0)
     p2 = trial.suggest_float("p2", 0.0001, 0.3, log=True)
@@ -144,14 +167,12 @@ def _objective(trial: optuna.trial.Trial) -> float:
     p8 = trial.suggest_float("p8", 0.1, 1.0, step=0.1)
     p9 = trial.suggest_float("p9", 2.2, 2.2, step=0.5)
     p10 = trial.suggest_categorical("p10", ["9", "3", "0", "8"])
-    assert isinstance(p10, str)
 
     return p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 + int(p10)
 
 
 def test_sample_relative_n_startup_trials() -> None:
-
-    independent_sampler = DeterministicRelativeSampler({}, {})
+    independent_sampler = optuna.samplers.RandomSampler()
     sampler = optuna.integration.SkoptSampler(
         n_startup_trials=2, independent_sampler=independent_sampler
     )
@@ -170,7 +191,6 @@ def test_sample_relative_n_startup_trials() -> None:
 
 
 def test_get_trials() -> None:
-
     with patch("optuna.Study.get_trials", new=Mock(side_effect=lambda deepcopy: _create_trials())):
         sampler = optuna.integration.SkoptSampler(consider_pruned_trials=False)
         study = optuna.create_study(sampler=sampler)
@@ -186,7 +206,6 @@ def test_get_trials() -> None:
 
 
 def _create_trials() -> List[FrozenTrial]:
-
     trials = []
     trials.append(_create_frozen_trial({}, {}))
     trials.append(
@@ -210,7 +229,6 @@ def _create_trials() -> List[FrozenTrial]:
 def _create_frozen_trial(
     params: Dict[str, Any], param_distributions: Dict[str, distributions.BaseDistribution]
 ) -> FrozenTrial:
-
     return FrozenTrial(
         number=0,
         value=1.0,

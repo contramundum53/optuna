@@ -1,12 +1,18 @@
 import types
 
-import catboost as cb
 import numpy as np
 import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration.catboost import CatBoostPruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
+
+
+with try_import():
+    import catboost as cb
+
+pytestmark = pytest.mark.integration
 
 
 def test_catboost_pruning_callback_call() -> None:
@@ -37,7 +43,6 @@ EVAL_SET_INDEXES = [None, 0, 1]
 @pytest.mark.parametrize("eval_set_index", EVAL_SET_INDEXES)
 def test_catboost_pruning_callback_init_param(metric: str, eval_set_index: int) -> None:
     def objective(trial: optuna.trial.Trial) -> float:
-
         train_x = np.asarray([[1.0], [2.0]])
         train_y = np.asarray([[1.0], [0.0]])
         valid_x = np.asarray([[1.0], [2.0]])
@@ -79,6 +84,8 @@ def test_catboost_pruning_callback_init_param(metric: str, eval_set_index: int) 
     assert study.trials[0].value == 1.0
 
 
+# TODO(Hemmi): Remove the skip decorator after CatBoost's error handling is fixed.
+# See https://github.com/optuna/optuna/pull/4190 for more details.
 @pytest.mark.skip(reason="Temporally skip due to unknown CatBoost error.")
 @pytest.mark.parametrize(
     "metric, eval_set_index",
@@ -88,8 +95,14 @@ def test_catboost_pruning_callback_init_param(metric: str, eval_set_index: int) 
     ],
 )
 def test_catboost_pruning_callback_errors(metric: str, eval_set_index: int) -> None:
-    def objective(trial: optuna.trial.Trial) -> float:
+    # This test aims to cover the ValueError block in CatBoostPruningCallback.after_iteration().
+    # However, catboost currently terminates with a SystemError when python>=3.9 or pytest>=7.2.0,
+    # otherwise terminates with RecursionError. This is because after_iteration() is called in a
+    # Cython function in the catboost library, which is causing the unexpected error behavior.
+    # Note that the difference in error type is mainly because the _Py_CheckRecursionLimit
+    # variable used in limited C API was removed after python 3.9.
 
+    def objective(trial: optuna.trial.Trial) -> float:
         train_x = np.asarray([[1.0], [2.0]])
         train_y = np.asarray([[1.0], [0.0]])
         valid_x = np.asarray([[1.0], [2.0]])
@@ -117,6 +130,6 @@ def test_catboost_pruning_callback_errors(metric: str, eval_set_index: int) -> N
 
     # Unknown validation name or metric.
     study = optuna.create_study(pruner=DeterministicPruner(False))
-    # Catboost terminates with a SystemError.
-    with pytest.raises(SystemError):
+
+    with pytest.raises(ValueError):
         study.optimize(objective, n_trials=1)

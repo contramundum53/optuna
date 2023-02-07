@@ -1,17 +1,22 @@
-from keras import Sequential
-from keras.layers import Dense
 import numpy as np
 import pytest
 
 import optuna
+from optuna._imports import try_import
 from optuna.integration import KerasPruningCallback
-from optuna.testing.pruner import DeterministicPruner
+from optuna.testing.pruners import DeterministicPruner
+
+
+with try_import():
+    from keras import Sequential
+    from keras.layers import Dense
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("interval, epochs", [(1, 1), (2, 1), (2, 2)])
 def test_keras_pruning_callback(interval: int, epochs: int) -> None:
     def objective(trial: optuna.trial.Trial) -> float:
-
         model = Sequential()
         model.add(Dense(1, activation="sigmoid", input_dim=20))
         model.compile(optimizer="rmsprop", loss="binary_crossentropy", metrics=["accuracy"])
@@ -40,7 +45,6 @@ def test_keras_pruning_callback(interval: int, epochs: int) -> None:
 
 
 def test_keras_pruning_callback_observation_isnan() -> None:
-
     study = optuna.create_study(pruner=DeterministicPruner(True))
     trial = study.ask()
     callback = KerasPruningCallback(trial, "loss")
@@ -53,7 +57,6 @@ def test_keras_pruning_callback_observation_isnan() -> None:
 
 
 def test_keras_pruning_callback_monitor_is_invalid() -> None:
-
     study = optuna.create_study(pruner=DeterministicPruner(True))
     trial = study.ask()
     callback = KerasPruningCallback(trial, "InvalidMonitor")

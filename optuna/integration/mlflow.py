@@ -1,4 +1,5 @@
 import functools
+import threading
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -9,6 +10,7 @@ from typing import Union
 
 import optuna
 from optuna._experimental import experimental_class
+from optuna._experimental import experimental_func
 from optuna._imports import try_import
 from optuna.study.study import ObjectiveFuncType
 
@@ -122,7 +124,6 @@ class MLflowCallback:
         tag_study_user_attrs: bool = False,
         tag_trial_user_attrs: bool = True,
     ) -> None:
-
         _imports.check()
 
         if not isinstance(metric_name, Sequence):
@@ -138,29 +139,29 @@ class MLflowCallback:
         self._mlflow_kwargs = mlflow_kwargs or {}
         self._tag_study_user_attrs = tag_study_user_attrs
         self._tag_trial_user_attrs = tag_trial_user_attrs
+        self._lock = threading.Lock()
 
     def __call__(self, study: optuna.study.Study, trial: optuna.trial.FrozenTrial) -> None:
+        with self._lock:
+            self._initialize_experiment(study)
 
-        self._initialize_experiment(study)
+            with mlflow.start_run(
+                run_id=trial.system_attrs.get(RUN_ID_ATTRIBUTE_KEY),
+                experiment_id=self._mlflow_kwargs.get("experiment_id"),
+                run_name=self._mlflow_kwargs.get("run_name") or str(trial.number),
+                nested=self._mlflow_kwargs.get("nested") or False,
+                tags=self._mlflow_kwargs.get("tags"),
+            ):
+                # This sets the metrics for MLflow.
+                self._log_metrics(trial.values)
 
-        with mlflow.start_run(
-            run_id=trial.system_attrs.get(RUN_ID_ATTRIBUTE_KEY),
-            experiment_id=self._mlflow_kwargs.get("experiment_id"),
-            run_name=self._mlflow_kwargs.get("run_name") or str(trial.number),
-            nested=self._mlflow_kwargs.get("nested") or False,
-            tags=self._mlflow_kwargs.get("tags"),
-        ):
+                # This sets the params for MLflow.
+                self._log_params(trial.params)
 
-            # This sets the metrics for MLflow.
-            self._log_metrics(trial.values)
+                # This sets the tags for MLflow.
+                self._set_tags(trial, study)
 
-            # This sets the params for MLflow.
-            self._log_params(trial.params)
-
-            # This sets the tags for MLflow.
-            self._set_tags(trial, study)
-
-    @experimental_class("2.9.0")
+    @experimental_func("2.9.0")
     def track_in_mlflow(self) -> Callable:
         """Decorator for using MLflow logging in the objective function.
 
@@ -198,20 +199,23 @@ class MLflowCallback:
                 study.optimize(objective, n_trials=10, callbacks=[mlflc])
 
         Returns:
-            ObjectiveFuncType: Objective function with tracking to MLflow enabled.
+            Objective function with tracking to MLflow enabled.
         """
 
         def decorator(func: ObjectiveFuncType) -> ObjectiveFuncType:
             @functools.wraps(func)
             def wrapper(trial: optuna.trial.Trial) -> Union[float, Sequence[float]]:
-                study = trial.study
-                self._initialize_experiment(study)
-                nested = self._mlflow_kwargs.get("nested")
+                with self._lock:
+                    study = trial.study
+                    self._initialize_experiment(study)
+                    nested = self._mlflow_kwargs.get("nested")
 
-                with mlflow.start_run(run_name=str(trial.number), nested=nested) as run:
-                    trial.set_system_attr(RUN_ID_ATTRIBUTE_KEY, run.info.run_id)
+                    with mlflow.start_run(run_name=str(trial.number), nested=nested) as run:
+                        trial.storage.set_trial_system_attr(
+                            trial._trial_id, RUN_ID_ATTRIBUTE_KEY, run.info.run_id
+                        )
 
-                    return func(trial)
+                        return func(trial)
 
             return wrapper
 
@@ -275,7 +279,6 @@ class MLflowCallback:
             if len(value) > max_val_length:
                 tags[key] = "{}...".format(value[: max_val_length - 3])
 
-        # This sets the tags for MLflow.
         mlflow.set_tags(tags)
 
     def _log_metrics(self, values: Optional[List[float]]) -> None:
@@ -318,5 +321,4 @@ class MLflowCallback:
         Args:
             params: Trial params.
         """
-
         mlflow.log_params(params)

@@ -18,6 +18,8 @@ from optuna.distributions import BaseDistribution
 from optuna.samplers import BaseSampler
 from optuna.samplers import IntersectionSearchSpace
 from optuna.samplers import RandomSampler
+from optuna.samplers._base import _CONSTRAINTS_KEY
+from optuna.samplers._base import _process_constraints_after_trial
 from optuna.study import Study
 from optuna.study import StudyDirection
 from optuna.trial import FrozenTrial
@@ -26,7 +28,7 @@ from optuna.trial import TrialState
 
 with try_import() as _imports:
     from botorch.acquisition.monte_carlo import qExpectedImprovement
-    from botorch.acquisition.multi_objective.monte_carlo import qExpectedHypervolumeImprovement
+    from botorch.acquisition.multi_objective import monte_carlo
     from botorch.acquisition.multi_objective.objective import IdentityMCMultiOutputObjective
     from botorch.acquisition.objective import ConstrainedMCObjective
     from botorch.acquisition.objective import GenericMCObjective
@@ -37,6 +39,7 @@ with try_import() as _imports:
     from botorch.sampling.samplers import SobolQMCNormalSampler
     from botorch.utils.multi_objective.box_decompositions import NondominatedPartitioning
     from botorch.utils.multi_objective.scalarization import get_chebyshev_scalarization
+    from botorch.utils.sampling import manual_seed
     from botorch.utils.sampling import sample_simplex
     from botorch.utils.transforms import normalize
     from botorch.utils.transforms import unnormalize
@@ -103,13 +106,12 @@ def qei_candidates_func(
         else:
             best_f = train_obj_feas.max()
 
-        constraints = []
         n_constraints = train_con.size(1)
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
         objective = ConstrainedMCObjective(
             objective=lambda Z: Z[..., 0],
-            constraints=constraints,
+            constraints=[
+                (lambda Z, i=i: Z[..., -n_constraints + i]) for i in range(n_constraints)
+            ],
         )
     else:
         train_y = train_obj
@@ -174,14 +176,12 @@ def qehvi_candidates_func(
         is_feas = (train_con <= 0).all(dim=-1)
         train_obj_feas = train_obj[is_feas]
 
-        constraints = []
         n_constraints = train_con.size(1)
-
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
         additional_qehvi_kwargs = {
             "objective": IdentityMCMultiOutputObjective(outcomes=list(range(n_objectives))),
-            "constraints": constraints,
+            "constraints": [
+                (lambda Z, i=i: Z[..., -n_constraints + i]) for i in range(n_constraints)
+            ],
         }
     else:
         train_y = train_obj
@@ -209,12 +209,94 @@ def qehvi_candidates_func(
 
     ref_point_list = ref_point.tolist()
 
-    acqf = qExpectedHypervolumeImprovement(
+    acqf = monte_carlo.qExpectedHypervolumeImprovement(
         model=model,
         ref_point=ref_point_list,
         partitioning=partitioning,
         sampler=SobolQMCNormalSampler(num_samples=256),
         **additional_qehvi_kwargs,
+    )
+
+    standard_bounds = torch.zeros_like(bounds)
+    standard_bounds[1] = 1
+
+    candidates, _ = optimize_acqf(
+        acq_function=acqf,
+        bounds=standard_bounds,
+        q=1,
+        num_restarts=20,
+        raw_samples=1024,
+        options={"batch_limit": 5, "maxiter": 200, "nonnegative": True},
+        sequential=True,
+    )
+
+    candidates = unnormalize(candidates.detach(), bounds=bounds)
+
+    return candidates
+
+
+@experimental_func("3.1.0")
+def qnehvi_candidates_func(
+    train_x: "torch.Tensor",
+    train_obj: "torch.Tensor",
+    train_con: Optional["torch.Tensor"],
+    bounds: "torch.Tensor",
+) -> "torch.Tensor":
+    """Quasi MC-based batch Expected Noisy Hypervolume Improvement (qNEHVI).
+
+    According to Botorch/Ax documentation,
+    this function may perform better than qEHVI (`qehvi_candidates_func`).
+    (cf. https://botorch.org/tutorials/constrained_multi_objective_bo )
+
+    .. seealso::
+        :func:`~optuna.integration.botorch.qei_candidates_func` for argument and return value
+        descriptions.
+    """
+
+    n_objectives = train_obj.size(-1)
+
+    if train_con is not None:
+        train_y = torch.cat([train_obj, train_con], dim=-1)
+
+        n_constraints = train_con.size(1)
+        additional_qnehvi_kwargs = {
+            "objective": IdentityMCMultiOutputObjective(outcomes=list(range(n_objectives))),
+            "constraints": [
+                (lambda Z, i=i: Z[..., -n_constraints + i]) for i in range(n_constraints)
+            ],
+        }
+    else:
+        train_y = train_obj
+
+        additional_qnehvi_kwargs = {}
+
+    train_x = normalize(train_x, bounds=bounds)
+
+    model = SingleTaskGP(train_x, train_y, outcome_transform=Standardize(m=train_y.shape[-1]))
+    mll = ExactMarginalLogLikelihood(model.likelihood, model)
+    fit_gpytorch_model(mll)
+
+    # Approximate box decomposition similar to Ax when the number of objectives is large.
+    # https://github.com/facebook/Ax/blob/master/ax/models/torch/botorch_moo_defaults
+    if n_objectives > 2:
+        alpha = 10 ** (-8 + n_objectives)
+    else:
+        alpha = 0.0
+
+    ref_point = train_obj.min(dim=0).values - 1e-8
+
+    ref_point_list = ref_point.tolist()
+
+    # prune_baseline=True is generally recommended by the documentation of BoTorch.
+    # cf. https://botorch.org/api/acquisition.html (accessed on 2022/11/18)
+    acqf = monte_carlo.qNoisyExpectedHypervolumeImprovement(
+        model=model,
+        ref_point=ref_point_list,
+        X_baseline=train_x,
+        alpha=alpha,
+        prune_baseline=True,
+        sampler=SobolQMCNormalSampler(num_samples=256),
+        **additional_qnehvi_kwargs,
     )
 
     standard_bounds = torch.zeros_like(bounds)
@@ -259,16 +341,12 @@ def qparego_candidates_func(
 
     if train_con is not None:
         train_y = torch.cat([train_obj, train_con], dim=-1)
-
-        constraints = []
         n_constraints = train_con.size(1)
-
-        for i in range(n_constraints):
-            constraints.append(lambda Z, i=i: Z[..., -n_constraints + i])
-
         objective = ConstrainedMCObjective(
             objective=lambda Z: scalarization(Z[..., :n_objectives]),
-            constraints=constraints,
+            constraints=[
+                (lambda Z, i=i: Z[..., -n_constraints + i]) for i in range(n_constraints)
+            ],
         )
     else:
         train_y = train_obj
@@ -325,8 +403,6 @@ def _get_default_candidates_func(
         return qei_candidates_func
 
 
-# TODO(hvy): Allow utilizing GPUs via some parameter, not having to rewrite the callback
-# functions.
 @experimental_class("2.4.0")
 class BoTorchSampler(BaseSampler):
     """A sampler that uses BoTorch, a Bayesian optimization library built on top of PyTorch.
@@ -381,6 +457,11 @@ class BoTorchSampler(BaseSampler):
         independent_sampler:
             An independent sampler to use for the initial trials and for parameters that are
             conditional.
+        seed:
+            Seed for random number generator.
+        device:
+            A ``torch.device`` to store input and output data of BoTorch. Please set a CUDA device
+            if you fasten sampling.
     """
 
     def __init__(
@@ -400,16 +481,20 @@ class BoTorchSampler(BaseSampler):
         constraints_func: Optional[Callable[[FrozenTrial], Sequence[float]]] = None,
         n_startup_trials: int = 10,
         independent_sampler: Optional[BaseSampler] = None,
+        seed: Optional[int] = None,
+        device: Optional["torch.device"] = None,
     ):
         _imports.check()
 
         self._candidates_func = candidates_func
         self._constraints_func = constraints_func
-        self._independent_sampler = independent_sampler or RandomSampler()
+        self._independent_sampler = independent_sampler or RandomSampler(seed=seed)
         self._n_startup_trials = n_startup_trials
+        self._seed = seed
 
         self._study_id: Optional[int] = None
         self._search_space = IntersectionSearchSpace()
+        self._device = device or torch.device("cpu")
 
     def infer_relative_search_space(
         self,
@@ -445,7 +530,7 @@ class BoTorchSampler(BaseSampler):
         if len(search_space) == 0:
             return {}
 
-        trials = [t for t in study.get_trials(deepcopy=False) if t.state == TrialState.COMPLETE]
+        trials = study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
 
         n_trials = len(trials)
         if n_trials < self._n_startup_trials:
@@ -472,7 +557,7 @@ class BoTorchSampler(BaseSampler):
 
             if self._constraints_func is not None:
                 constraints = study._storage.get_trial_system_attrs(trial._trial_id).get(
-                    "botorch:constraints"
+                    _CONSTRAINTS_KEY
                 )
                 if constraints is not None:
                     n_constraints = len(constraints)
@@ -498,11 +583,11 @@ class BoTorchSampler(BaseSampler):
                     "constraints. Constraints passed to `candidates_func` will contain NaN."
                 )
 
-        values = torch.from_numpy(values)
-        params = torch.from_numpy(params)
+        values = torch.from_numpy(values).to(self._device)
+        params = torch.from_numpy(params).to(self._device)
         if con is not None:
-            con = torch.from_numpy(con)
-        bounds = torch.from_numpy(bounds)
+            con = torch.from_numpy(con).to(self._device)
+        bounds = torch.from_numpy(bounds).to(self._device)
 
         if con is not None:
             if con.dim() == 1:
@@ -511,7 +596,14 @@ class BoTorchSampler(BaseSampler):
 
         if self._candidates_func is None:
             self._candidates_func = _get_default_candidates_func(n_objectives=n_objectives)
-        candidates = self._candidates_func(params, values, con, bounds)
+
+        with manual_seed(self._seed):
+            # `manual_seed` makes the default candidates functions reproducible.
+            # `SobolQMCNormalSampler`'s constructor has a `seed` argument, but its behavior is
+            # deterministic when the BoTorch's seed is fixed.
+            candidates = self._candidates_func(params, values, con, bounds)
+            if self._seed is not None:
+                self._seed += 1
 
         if not isinstance(candidates, torch.Tensor):
             raise TypeError("Candidates must be a torch.Tensor.")
@@ -532,7 +624,7 @@ class BoTorchSampler(BaseSampler):
                 f"{candidates.size(0)}, bounds: {bounds.size(1)}."
             )
 
-        return trans.untransform(candidates.numpy())
+        return trans.untransform(candidates.cpu().numpy())
 
     def sample_independent(
         self,
@@ -547,6 +639,8 @@ class BoTorchSampler(BaseSampler):
 
     def reseed_rng(self) -> None:
         self._independent_sampler.reseed_rng()
+        if self._seed is not None:
+            self._seed = numpy.random.RandomState().randint(2**60)
 
     def after_trial(
         self,
@@ -556,21 +650,5 @@ class BoTorchSampler(BaseSampler):
         values: Optional[Sequence[float]],
     ) -> None:
         if self._constraints_func is not None:
-            constraints = None
-
-            try:
-                con = self._constraints_func(trial)
-                if not isinstance(con, (tuple, list)):
-                    warnings.warn(
-                        f"Constraints should be a sequence of floats but got {type(con).__name__}."
-                    )
-                constraints = tuple(con)
-            finally:
-                assert constraints is None or isinstance(constraints, tuple)
-
-                study._storage.set_trial_system_attr(
-                    trial._trial_id,
-                    "botorch:constraints",
-                    constraints,
-                )
+            _process_constraints_after_trial(self._constraints_func, study, trial, state)
         self._independent_sampler.after_trial(study, trial, state, values)
