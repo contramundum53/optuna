@@ -1011,9 +1011,8 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
     ) -> Optional[Callable[["optuna.study.Study", FrozenTrial], None]]:
         return self.failed_trial_callback
 
-    def __del__(self):
-        print("Dispose!")
-        self.engine.dispose()
+    # def __del__(self):
+    #     self.engine.dispose()
 
 class _VersionManager:
     def __init__(
