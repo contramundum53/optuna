@@ -192,48 +192,48 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
 #     print("test_loaded_trials 終了")
 
 
-# @pytest.mark.parametrize(
-#     "input_value,expected",
-#     [
-#         (float("inf"), float("inf")),
-#         (-float("inf"), -float("inf")),
-#     ],
-# )
-# def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
-#     print("test_store_infinite_values 開始")
-#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-#     trial_id = storage.create_new_trial(study_id)
-#     storage.set_trial_intermediate_value(trial_id, 1, input_value)
-#     storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
-#     assert storage.get_trial(trial_id).value == expected
-#     assert storage.get_trial(trial_id).intermediate_values[1] == expected
-#     print("test_store_infinite_values 終了")
+@pytest.mark.parametrize(
+    "input_value,expected",
+    [
+        (float("inf"), float("inf")),
+        (-float("inf"), -float("inf")),
+    ],
+)
+def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
+    print("test_store_infinite_values 開始")
+    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+    trial_id = storage.create_new_trial(study_id)
+    storage.set_trial_intermediate_value(trial_id, 1, input_value)
+    storage.set_trial_state_values(trial_id, state=TrialState.COMPLETE, values=(input_value,))
+    assert storage.get_trial(trial_id).value == expected
+    assert storage.get_trial(trial_id).intermediate_values[1] == expected
+    print("test_store_infinite_values 終了")
 
 
-# def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
-#     print("test_store_nan_intermediate_values 開始")
-#     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
-#     trial_id = storage.create_new_trial(study_id)
+def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
+    print("test_store_nan_intermediate_values 開始")
+    study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
+    trial_id = storage.create_new_trial(study_id)
 
-#     value = float("nan")
-#     storage.set_trial_intermediate_value(trial_id, 1, value)
+    value = float("nan")
+    storage.set_trial_intermediate_value(trial_id, 1, value)
 
-#     got_value = storage.get_trial(trial_id).intermediate_values[1]
-#     assert np.isnan(got_value)
-#     print("test_store_nan_intermediate_values 終了")
+    got_value = storage.get_trial(trial_id).intermediate_values[1]
+    assert np.isnan(got_value)
+    print("test_store_nan_intermediate_values 終了")
 
 
-# def test_multithread_create_study(storage: BaseStorage) -> None:
-#     print("test_multithread_create_study 開始")
-#     with ThreadPoolExecutor(10) as pool:
-#         for _ in range(10):
-#             pool.submit(
-#                 optuna.create_study,
-#                 storage=storage,
-#                 study_name="test-multithread-create-study",
-#                 load_if_exists=True,
-#             )
-#     print("test_multithread_create_study 終了")
+def test_multithread_create_study(storage: BaseStorage) -> None:
+    print("test_multithread_create_study 開始")
+    with ThreadPoolExecutor(10) as pool:
+        for _ in range(10):
+            pool.submit(
+                optuna.create_study,
+                storage=storage,
+                study_name="test-multithread-create-study",
+                load_if_exists=True,
+            )
+    print("test_multithread_create_study 終了")
 
 
 def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
