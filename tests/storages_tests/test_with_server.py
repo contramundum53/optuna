@@ -38,7 +38,7 @@ def get_storage() -> BaseStorage:
 
     storage: BaseStorage
     if storage_mode == "":
-        storage = optuna.storages.RDBStorage(url=storage_url) #, engine_kwargs={"poolclass": NullPool})
+        storage = optuna.storages.RDBStorage(url=storage_url, engine_kwargs={"pool_size": 1}) #, engine_kwargs={"poolclass": NullPool})
     elif storage_mode == "journal-redis":
         journal_redis_storage = optuna.storages.JournalRedisStorage(storage_url)
         storage = optuna.storages.JournalStorage(journal_redis_storage)
