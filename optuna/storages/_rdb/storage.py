@@ -846,6 +846,7 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
             trials = [self._build_frozen_trial_from_trial_model(trial) for trial in trial_models]
 
         return trials
+        
 
     def _build_frozen_trial_from_trial_model(self, trial: "models.TrialModel") -> FrozenTrial:
         values: Optional[List[float]]
@@ -1010,6 +1011,8 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
     ) -> Optional[Callable[["optuna.study.Study", FrozenTrial], None]]:
         return self.failed_trial_callback
 
+    def __del__(self):
+        self.engine.dispose()
 
 class _VersionManager:
     def __init__(
