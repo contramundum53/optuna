@@ -48,14 +48,10 @@ def get_storage() -> BaseStorage:
     return storage
 
 
-@pytest.fixture
-def storage() -> BaseStorage:
-    storage = get_storage()
-    try:
-        optuna.study.delete_study(study_name=_STUDY_NAME, storage=storage)
-    except KeyError:
-        pass
-    return storage
+# @pytest.fixture
+# def storage() -> BaseStorage:
+#     storage = get_storage()
+#     return storage
 
 
 def start_trace():
@@ -97,7 +93,8 @@ import sys
 import traceback
 import io
 
-def run_optimize(study_name: str, storage: BaseStorage, n_trials: int) -> None:
+def run_optimize(study_name: str, n_trials: int) -> None:
+    storage = get_storage()
     pid = os.getpid()
     try:
         print(f"{pid}> hoge")
@@ -200,8 +197,9 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
         (-float("inf"), -float("inf")),
     ],
 )
-def test_store_infinite_values(input_value: float, expected: float, storage: BaseStorage) -> None:
+def test_store_infinite_values(input_value: float, expected: float) -> None:
     print("test_store_infinite_values 開始")
+    storage = get_storage()
     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
     trial_id = storage.create_new_trial(study_id)
     storage.set_trial_intermediate_value(trial_id, 1, input_value)
@@ -211,8 +209,9 @@ def test_store_infinite_values(input_value: float, expected: float, storage: Bas
     print("test_store_infinite_values 終了")
 
 
-def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
+def test_store_nan_intermediate_values() -> None:
     print("test_store_nan_intermediate_values 開始")
+    storage = get_storage()
     study_id = storage.create_new_study(directions=[StudyDirection.MINIMIZE])
     trial_id = storage.create_new_trial(study_id)
 
@@ -224,8 +223,9 @@ def test_store_nan_intermediate_values(storage: BaseStorage) -> None:
     print("test_store_nan_intermediate_values 終了")
 
 
-def test_multithread_create_study(storage: BaseStorage) -> None:
+def test_multithread_create_study() -> None:
     print("test_multithread_create_study 開始")
+    storage = get_storage()
     with ThreadPoolExecutor(10) as pool:
         for _ in range(10):
             pool.submit(
@@ -237,14 +237,19 @@ def test_multithread_create_study(storage: BaseStorage) -> None:
     print("test_multithread_create_study 終了")
 
 
-def test_multiprocess_run_optimize(storage: BaseStorage) -> None:
+def test_multiprocess_run_optimize() -> None:
     print("test_multiprocess_run_optimize 開始")
     n_workers = 8
     n_trials = 20
     study_name = _STUDY_NAME
+    storage=get_storage()
+    try:
+        optuna.study.delete_study(study_name=study_name, storage=storage)
+    except KeyError:
+        pass
     optuna.create_study(storage=storage, study_name=study_name)
     with ProcessPoolExecutor(n_workers) as pool:
-        pool.map(run_optimize, *zip(*[[study_name, storage, n_trials]] * n_workers))
+        pool.map(run_optimize, *zip(*[[study_name, n_trials]] * n_workers))
 
     study = optuna.load_study(study_name=study_name, storage=storage)
 
