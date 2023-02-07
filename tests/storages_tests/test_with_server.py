@@ -88,16 +88,51 @@ def start_trace():
 
     sys.settrace(tracer)
 
+import time
+import threading
+import os
+import signal
+import sys
+import traceback
+import io
+
 def run_optimize(study_name: str, storage: BaseStorage, n_trials: int) -> None:
+    pid = os.getpid()
     try:
-        start_trace()
+        print(f"{pid}> hoge")
+        # raise Exception("aaa")
+        # start_trace()
         # Create a study
+        latest = time.monotonic()
         study = optuna.load_study(study_name=study_name, storage=storage)
+        stop = False
+        def tick():
+            cur = time.monotonic()
+            if cur - latest > 20:
+                print(f"{pid}> *** Deadlock detected ***")
+                os.kill(os.getpid(), signal.SIGINT)
+            if stop:
+                return
+            
+            timer = threading.Timer(1, function=tick)
+            timer.start()
+        
+        # thread = threading.Thread(target=run)
+        timer = threading.Timer(1, function=tick)
+        timer.start()
         # Run optimization
-        study.optimize(objective, n_trials=n_trials)
-    except Exception as e:
-        print("hogehoge")
-        print(e.with_traceback())
+        def callback(*args):
+            nonlocal latest
+            print(f"{pid}> update {latest}")
+            latest = time.monotonic()
+        study.optimize(objective, n_trials=n_trials, callbacks=[callback])
+        stop=True
+    except (Exception, KeyboardInterrupt) as e:
+        strio = io.StringIO() #newline=f"\n{pid}> ")
+        traceback.print_exception(e, file=strio)
+        lines = strio.getvalue().splitlines()
+        out = "\n".join([f"{pid}> {s}" for s in lines])
+        print(out)
         raise e
 
 def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
@@ -130,13 +165,13 @@ def _check_trials(trials: Sequence[optuna.trial.FrozenTrial]) -> None:
     )
 
 
-def test_tracer():
-    start_trace()
-    def fib(i):
-        if i <= 1:
-            return 1
-        return fib(i - 1) + fib(i - 2)
-    assert fib(5) == 8
+# def test_tracer():
+#     start_trace()
+#     def fib(i):
+#         if i <= 1:
+#             return 1
+#         return fib(i - 1) + fib(i - 2)
+#     assert fib(5) == 8
 # def test_loaded_trials(storage: BaseStorage) -> None:
 #     print("test_loaded_trials 開始")
 #     # Please create the tables by placing this function before the multi-process tests.
