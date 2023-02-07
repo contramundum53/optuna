@@ -1012,6 +1012,7 @@ class RDBStorage(BaseStorage, BaseHeartbeat):
         return self.failed_trial_callback
 
     def __del__(self):
+        print("Dispose!")
         self.engine.dispose()
 
 class _VersionManager:
