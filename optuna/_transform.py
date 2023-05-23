@@ -116,6 +116,7 @@ class _SearchSpaceTransform:
                 trans_params[bound_idx + choice_idx] = 1
                 bound_idx += len(distribution.choices)
             else:
+                assert isinstance(distribution, (FloatDistribution, IntDistribution))
                 trans_params[bound_idx] = _transform_numerical_param(
                     param, distribution, self._transform_log
                 )
@@ -161,6 +162,7 @@ class _SearchSpaceTransform:
                 # Select the highest rated one-hot encoding.
                 param = distribution.to_external_repr(trans_param.argmax())
             else:
+                assert isinstance(distribution, (FloatDistribution, IntDistribution))
                 param = _untransform_numerical_param(
                     trans_param.item(), distribution, self._transform_log
                 )
@@ -175,6 +177,7 @@ def _transform_search_space(
 ) -> Tuple[numpy.ndarray, List[numpy.ndarray], numpy.ndarray]:
     assert len(search_space) > 0, "Cannot transform if no distributions are given."
 
+    assert all(isinstance(d, (CategoricalDistribution, FloatDistribution, IntDistribution)) for d in search_space.values())
     n_bounds = sum(
         len(d.choices) if isinstance(d, CategoricalDistribution) else 1
         for d in search_space.values()

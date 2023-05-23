@@ -451,6 +451,10 @@ class _Optimizer:
                 return optuna_param_value - dist.low
         elif isinstance(dist, CategoricalDistribution):
             return dist.choices.index(optuna_param_value)
+        else:
+            raise NotImplementedError(
+                "The distribution {} is not implemented.".format(dist)
+            )
         return optuna_param_value
 
     @staticmethod
@@ -480,7 +484,10 @@ class _Optimizer:
         elif isinstance(dist, CategoricalDistribution):
             v = int(numpy.round(cma_param_value))
             return dist.choices[v]
-        return cma_param_value
+        else:
+            raise NotImplementedError(
+                "The distribution {} is not implemented.".format(distribution)
+            )
 
 
 @deprecated_class("2.0.0", "4.0.0", text=_cma_deprecated_msg)

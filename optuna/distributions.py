@@ -661,12 +661,9 @@ def check_distribution_compatibility(
 
         if dist_old.log != dist_new.log:
             raise ValueError("Cannot set different log configuration to the same parameter name.")
+        return
 
-    if not isinstance(dist_old, CategoricalDistribution):
-        return
-    if not isinstance(dist_new, CategoricalDistribution):
-        return
-    if dist_old != dist_new:
+    if dist_old != dist_new: # type: ignore
         raise ValueError(
             CategoricalDistribution.__name__ + " does not support dynamic value space."
         )
