@@ -446,13 +446,14 @@ class TPESampler(BaseSampler):
             )
 
         indices_below, indices_above = _split_observation_pairs(scores, self._gamma(n), violations)
-        # `None` items are intentionally converted to `nan` and then filtered out.
-        # For `nan` conversion, the dtype must be float.
-        config_value = np.asarray(values[param_name], dtype=float)
-        param_mask = ~np.isnan(config_value)
+
+        param_mask = np.array([v is not None for v in values[param_name]])
+        masked_index = np.cumsum(param_mask) - 1
         param_mask_below, param_mask_above = param_mask[indices_below], param_mask[indices_above]
-        below = {param_name: config_value[indices_below[param_mask_below]]}
-        above = {param_name: config_value[indices_above[param_mask_above]]}
+        
+        masked_values_arr = np.array([v for v in values[param_name] if v is not None])
+        below = {param_name: masked_values_arr[masked_index[indices_below]]}
+        above = {param_name: masked_values_arr[masked_index[indices_above]]}
 
         if study._is_multi_objective():
             weights_below = _calculate_weights_below_for_multi_objective(
@@ -485,7 +486,7 @@ class TPESampler(BaseSampler):
         log_l: np.ndarray,
         log_g: np.ndarray,
     ) -> Dict[str, Union[float, int]]:
-        sample_size = next(iter(samples.values())).size
+        sample_size = len(next(iter(samples.values())))
         if sample_size:
             score = log_l - log_g
             if sample_size != score.size:
@@ -495,7 +496,7 @@ class TPESampler(BaseSampler):
                     "But (samples.size, score.size) = ({}, {})".format(sample_size, score.size)
                 )
             best = np.argmax(score)
-            return {k: v[best].item() for k, v in samples.items()}
+            return {k: v[best] for k, v in samples.items()}
         else:
             raise ValueError(
                 "The size of 'samples' should be more than 0."

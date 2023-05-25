@@ -11,10 +11,12 @@ from optuna.distributions import BaseDistribution
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
+from optuna.distributions import PermutationDistribution
 from optuna.samplers._tpe.probability_distributions import _BatchedCategoricalDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDiscreteTruncNormDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedTruncNormDistributions
+from optuna.samplers._tpe.probability_distributions import _BatchedPermutationDistributions
 from optuna.samplers._tpe.probability_distributions import _MixtureOfProductDistribution
 
 
@@ -72,12 +74,12 @@ class _ParzenEstimator:
         weights /= weights.sum()
         self._mixture_distribution = _MixtureOfProductDistribution(
             weights=weights,
-            distributions=[
-                self._calculate_distributions(
-                    transformed_observations[:, i], search_space[param], parameters
+            distributions={
+                param: self._calculate_distributions(
+                    transformed_observations[param], search_space[param], parameters
                 )
-                for i, param in enumerate(search_space)
-            ],
+                for param in search_space
+            },
         )
 
     def sample(self, rng: np.random.RandomState, size: int) -> Dict[str, np.ndarray]:
@@ -116,21 +118,28 @@ class _ParzenEstimator:
         return isinstance(dist, (FloatDistribution, IntDistribution)) and dist.log
 
     def _transform(self, samples_dict: Dict[str, np.ndarray]) -> np.ndarray:
-        return np.array(
-            [
-                np.log(samples_dict[param])
-                if self._is_log(self._search_space[param])
-                else samples_dict[param]
-                for param in self._search_space
-            ]
-        ).T
+        data_len = next(samples_dict.values().__iter__()).shape[0]
+        assert all(vals.shape[0] == data_len for vals in samples_dict.values())
+        dtype = np.dtype([
+            (param, vals.dtype, vals.shape[1:]) for param, vals in samples_dict.items()
+        ])
+        ret = np.empty(shape=(data_len,), dtype=dtype)
+        for param, vals in samples_dict.items():
+            if self._is_log(self._search_space[param]):
+                ret[param] = np.log(vals)
+            else:
+                ret[param] = vals
 
-    def _untransform(self, samples_array: np.ndarray) -> Dict[str, np.ndarray]:
+        return ret
+
+    def _untransform(self, samples_array: np.ndarray) -> dict[str, np.ndarray]:
+
+
         res = {
-            param: np.exp(samples_array[:, i])
+            param: np.exp(samples_array[param])
             if self._is_log(self._search_space[param])
-            else samples_array[:, i]
-            for i, param in enumerate(self._search_space)
+            else samples_array[param]
+            for param in self._search_space
         }
         # TODO(contramundum53): Remove this line after fixing log-Int hack.
         return {
@@ -154,8 +163,7 @@ class _ParzenEstimator:
             return self._calculate_categorical_distributions(
                 transformed_observations, search_space.choices, parameters
             )
-        else:
-            assert isinstance(search_space, (FloatDistribution, IntDistribution))
+        elif isinstance(search_space, (FloatDistribution, IntDistribution)):
             if search_space.log:
                 low = np.log(search_space.low)
                 high = np.log(search_space.high)
@@ -172,6 +180,15 @@ class _ParzenEstimator:
 
             return self._calculate_numerical_distributions(
                 transformed_observations, low, high, step, parameters
+            )
+        elif isinstance(search_space, PermutationDistribution):
+            return self._calculate_permutation_distributions(
+                transformed_observations, 
+                parameters,
+            )
+        else:
+            raise NotImplementedError(
+                f"Unsupported distribution type: {type(search_space)}"
             )
 
     def _calculate_categorical_distributions(
@@ -264,3 +281,23 @@ class _ParzenEstimator:
             return _BatchedTruncNormDistributions(mus, sigmas, low, high)
         else:
             return _BatchedDiscreteTruncNormDistributions(mus, sigmas, low, high, step)
+
+
+    def _calculate_permutation_distributions(
+        self,
+        observations: np.ndarray,
+        parameters: _ParzenEstimatorParameters,
+    ) -> _BatchedDistributions:
+        
+        
+        assert parameters.prior_weight is not None
+
+        BETA_CONSTANT = 0.6
+        beta = (
+            parameters.prior_weight / (parameters.prior_weight + len(observations))
+        ) ** BETA_CONSTANT
+        
+        return _BatchedPermutationDistributions(
+            origin=np.append(observations, np.arange(observations.shape[1])[None, :], axis=0), 
+            beta=np.append(np.full(len(observations), beta), 1.0),
+        )

@@ -11,6 +11,10 @@ from optuna.samplers import BaseSampler
 from optuna.study import Study
 from optuna.trial import FrozenTrial
 
+from optuna.distributions import FloatDistribution
+from optuna.distributions import IntDistribution
+from optuna.distributions import CategoricalDistribution
+from optuna.distributions import PermutationDistribution
 
 class RandomSampler(BaseSampler):
     """Sampler using random sampling.
@@ -61,8 +65,12 @@ class RandomSampler(BaseSampler):
         param_name: str,
         param_distribution: distributions.BaseDistribution,
     ) -> Any:
-        search_space = {param_name: param_distribution}
-        trans = _SearchSpaceTransform(search_space)
-        trans_params = self._rng.uniform(trans.bounds[:, 0], trans.bounds[:, 1])
-
-        return trans.untransform(trans_params)[param_name]
+        if isinstance(param_distribution, (FloatDistribution, IntDistribution, CategoricalDistribution)):
+            search_space = {param_name: param_distribution}
+            trans = _SearchSpaceTransform(search_space)
+            trans_params = self._rng.uniform(trans.bounds[:, 0], trans.bounds[:, 1])
+            return trans.untransform(trans_params)[param_name]
+        elif isinstance(param_distribution, PermutationDistribution):
+            return list(self._rng.permutation(param_distribution.n))
+        else:
+            assert False, f"Unknown distribution object {param_distribution} is passed"
