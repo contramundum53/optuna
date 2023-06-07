@@ -14,7 +14,6 @@ from optuna.trial import FrozenTrial
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
 from optuna.distributions import CategoricalDistribution
-from optuna.distributions import PermutationDistribution
 from optuna.distributions import CombinationDistribution
 
 class RandomSampler(BaseSampler):
@@ -70,9 +69,8 @@ class RandomSampler(BaseSampler):
             search_space = {param_name: param_distribution}
             trans = _SearchSpaceTransform(search_space)
             trans_params = self._rng.uniform(trans.bounds[:, 0], trans.bounds[:, 1])
+            
             return trans.untransform(trans_params)[param_name]
-        elif isinstance(param_distribution, PermutationDistribution):
-            return list(self._rng.permutation(param_distribution.n))
         elif isinstance(param_distribution, CombinationDistribution):
             one_indices = self._rng.choice(param_distribution.n, param_distribution.k, replace=False)
             res = numpy.zeros(param_distribution.n, dtype=numpy.bool8)

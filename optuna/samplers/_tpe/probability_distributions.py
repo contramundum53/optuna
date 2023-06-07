@@ -5,7 +5,6 @@ from typing import Union
 import numpy as np
 
 from optuna.samplers._tpe import _truncnorm
-from optuna.samplers._tpe import _permutation_distribution
 from optuna.samplers._tpe import _combination_distribution
 
 
@@ -27,10 +26,6 @@ class _BatchedDiscreteTruncNormDistributions(NamedTuple):
     high: float
     step: float
 
-class _BatchedPermutationDistributions(NamedTuple):
-    origin: np.ndarray
-    beta: np.ndarray
-
 class _BatchedCombinationDistributions(NamedTuple):
     origin: np.ndarray
     beta: np.ndarray
@@ -40,15 +35,12 @@ _BatchedDistributions = Union[
     _BatchedCategoricalDistributions,
     _BatchedTruncNormDistributions,
     _BatchedDiscreteTruncNormDistributions,
-    _BatchedPermutationDistributions,
     _BatchedCombinationDistributions,
 ]
 
 def _get_sampled_type(batched_distribution: _BatchedDistributions) -> tuple[np.dtype, tuple[...]]:
     if isinstance(batched_distribution, (_BatchedCategoricalDistributions, _BatchedTruncNormDistributions, _BatchedDiscreteTruncNormDistributions)):
         return (np.float64, ())
-    elif isinstance(batched_distribution, _BatchedPermutationDistributions):
-        return (int, (batched_distribution.origin.shape[1],))
     elif isinstance(batched_distribution, _BatchedCombinationDistributions):
         return (np.bool8, (batched_distribution.origin.shape[1],))
     else:
@@ -57,7 +49,6 @@ def _get_sampled_type(batched_distribution: _BatchedDistributions) -> tuple[np.d
 class _MixtureOfProductDistribution(NamedTuple):
     weights: np.ndarray
     distributions: dict[str, _BatchedDistributions]
-
 
     def sample(self, rng: np.random.RandomState, batch_size: int) -> np.ndarray:
         active_indices = rng.choice(len(self.weights), p=self.weights, size=batch_size)
@@ -97,11 +88,6 @@ class _MixtureOfProductDistribution(NamedTuple):
                 ret[param] = np.clip(
                     d.low + np.round((samples - d.low) / d.step) * d.step, d.low, d.high
                 )
-            elif isinstance(d, _BatchedPermutationDistributions):
-                perm = _permutation_distribution.batch_sample_permutation(
-                    d.beta[active_indices], d.origin.shape[1], batch_size, rng
-                )
-                ret[param] = d.origin[active_indices[:, None], perm]
             elif isinstance(d, _BatchedCombinationDistributions):
                 combin = _combination_distribution.batch_sample_combination(
                     d.beta[active_indices], d.origin[active_indices, :], d.k, rng
@@ -147,16 +133,7 @@ class _MixtureOfProductDistribution(NamedTuple):
                     (d.high + d.step / 2 - d.mu[None, :]) / d.sigma[None, :],
                 )
                 log_pdfs[:, :, i] = log_gauss_mass - log_p_accept
-            elif isinstance(d, _BatchedPermutationDistributions):
-                perm = np.empty((batch_size, d.origin.shape[0], d.origin.shape[1]), dtype=int)
-                perm[
-                    np.arange(batch_size)[:, None, None], 
-                    np.arange(d.origin.shape[0])[None, :, None],
-                    d.origin[None, :, :]
-                ] = xi[:, None, :]
-                log_pdfs[:, :, i] = _permutation_distribution.batch_log_pdf(
-                    d.beta[None, :], perm
-                )
+                
             elif isinstance(d, _BatchedCombinationDistributions):
                 log_pdfs[:, :, i] = _combination_distribution.batch_log_pdf(
                     d.beta[None, :], d.origin[None, :], d.k, xi[:, None]

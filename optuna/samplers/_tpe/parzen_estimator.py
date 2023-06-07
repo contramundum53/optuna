@@ -11,13 +11,11 @@ from optuna.distributions import BaseDistribution
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
-from optuna.distributions import PermutationDistribution
 from optuna.distributions import CombinationDistribution
 from optuna.samplers._tpe.probability_distributions import _BatchedCategoricalDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDiscreteTruncNormDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedTruncNormDistributions
-from optuna.samplers._tpe.probability_distributions import _BatchedPermutationDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedCombinationDistributions
 from optuna.samplers._tpe.probability_distributions import _MixtureOfProductDistribution
 
@@ -183,11 +181,6 @@ class _ParzenEstimator:
             return self._calculate_numerical_distributions(
                 transformed_observations, low, high, step, parameters
             )
-        elif isinstance(search_space, PermutationDistribution):
-            return self._calculate_permutation_distributions(
-                transformed_observations, 
-                parameters,
-            )
         elif isinstance(search_space, CombinationDistribution):
             return self._calculate_combination_distributions(
                 transformed_observations, 
@@ -289,26 +282,6 @@ class _ParzenEstimator:
             return _BatchedTruncNormDistributions(mus, sigmas, low, high)
         else:
             return _BatchedDiscreteTruncNormDistributions(mus, sigmas, low, high, step)
-
-
-    def _calculate_permutation_distributions(
-        self,
-        observations: np.ndarray,
-        parameters: _ParzenEstimatorParameters,
-    ) -> _BatchedDistributions:
-        
-        
-        assert parameters.prior_weight is not None
-
-        BETA_CONSTANT = 0.6
-        beta = (
-            parameters.prior_weight / (parameters.prior_weight + len(observations))
-        ) ** BETA_CONSTANT
-        
-        return _BatchedPermutationDistributions(
-            origin=np.append(observations, np.arange(observations.shape[1])[None, :], axis=0), 
-            beta=np.append(np.full(len(observations), beta), 1.0),
-        )
 
     def _calculate_combination_distributions(
         self,

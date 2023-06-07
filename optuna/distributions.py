@@ -563,24 +563,6 @@ class CategoricalDistribution(BaseDistribution):
 
     __hash__ = BaseDistribution.__hash__
 
-class PermutationDistribution(BaseDistribution):
-
-    def __init__(self, n: int) -> None:
-        self.n = n
-
-    def to_external_repr(self, param_value_in_internal_repr: list[int]) -> list[int]:
-        return param_value_in_internal_repr
-
-    def to_internal_repr(self, param_value_in_external_repr: list[int]) -> list[int]:
-        return param_value_in_external_repr
-
-    def single(self) -> bool:
-        return self.n == 1
-
-    def _contains(self, param_value_in_internal_repr: list[int]) -> bool:
-        return sorted(param_value_in_internal_repr) == list(range(self.n))
-
-
 class CombinationDistribution(BaseDistribution):
 
     def __init__(self, n: int, k: int) -> None:
@@ -609,7 +591,6 @@ DISTRIBUTION_CLASSES = (
     LogUniformDistribution,
     DiscreteUniformDistribution,
     CategoricalDistribution,
-    PermutationDistribution,
     CombinationDistribution,
 )
 
