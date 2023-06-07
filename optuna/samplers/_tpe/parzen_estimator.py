@@ -12,11 +12,13 @@ from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
 from optuna.distributions import PermutationDistribution
+from optuna.distributions import CombinationDistribution
 from optuna.samplers._tpe.probability_distributions import _BatchedCategoricalDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDiscreteTruncNormDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedTruncNormDistributions
 from optuna.samplers._tpe.probability_distributions import _BatchedPermutationDistributions
+from optuna.samplers._tpe.probability_distributions import _BatchedCombinationDistributions
 from optuna.samplers._tpe.probability_distributions import _MixtureOfProductDistribution
 
 
@@ -186,6 +188,12 @@ class _ParzenEstimator:
                 transformed_observations, 
                 parameters,
             )
+        elif isinstance(search_space, CombinationDistribution):
+            return self._calculate_combination_distributions(
+                transformed_observations, 
+                parameters,
+                search_space.k,
+            )
         else:
             raise NotImplementedError(
                 f"Unsupported distribution type: {type(search_space)}"
@@ -300,4 +308,27 @@ class _ParzenEstimator:
         return _BatchedPermutationDistributions(
             origin=np.append(observations, np.arange(observations.shape[1])[None, :], axis=0), 
             beta=np.append(np.full(len(observations), beta), 1.0),
+        )
+
+    def _calculate_combination_distributions(
+        self,
+        observations: np.ndarray,
+        parameters: _ParzenEstimatorParameters,
+        k: int,
+    ) -> _BatchedDistributions:
+        
+        
+        assert parameters.prior_weight is not None
+
+        BETA_CONSTANT = 1.0
+        beta = (
+            parameters.prior_weight / (parameters.prior_weight + len(observations))
+        ) ** BETA_CONSTANT
+        
+        dummy_observation = np.zeros((1, observations.shape[1]), dtype=np.bool8)
+        dummy_observation[0, :k] = True
+        return _BatchedCombinationDistributions(
+            origin=np.append(observations, dummy_observation, axis=0), 
+            beta=np.append(np.full(len(observations), beta), 1.0),
+            k=k,
         )

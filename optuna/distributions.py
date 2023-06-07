@@ -581,6 +581,25 @@ class PermutationDistribution(BaseDistribution):
         return sorted(param_value_in_internal_repr) == list(range(self.n))
 
 
+class CombinationDistribution(BaseDistribution):
+
+    def __init__(self, n: int, k: int) -> None:
+        self.n = n
+        self.k = k
+
+    def to_external_repr(self, param_value_in_internal_repr: np.ndarray) -> np.ndarray:
+        return param_value_in_internal_repr
+
+    def to_internal_repr(self, param_value_in_external_repr: np.ndarray) -> np.ndarray:
+        return param_value_in_external_repr
+
+    def single(self) -> bool:
+        return self.n == self.k or self.k == 0
+
+    def _contains(self, param_value_in_internal_repr: np.ndarray) -> bool:
+        return param_value_in_internal_repr.shape == (self.n,) and np.count_nonzero(param_value_in_internal_repr) == self.k
+
+
 DISTRIBUTION_CLASSES = (
     IntDistribution,
     IntLogUniformDistribution,
@@ -591,6 +610,7 @@ DISTRIBUTION_CLASSES = (
     DiscreteUniformDistribution,
     CategoricalDistribution,
     PermutationDistribution,
+    CombinationDistribution,
 )
 
 

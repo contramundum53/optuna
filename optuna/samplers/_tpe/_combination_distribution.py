@@ -1,27 +1,29 @@
 import numpy as np
+import functools
 
-EPS = 1e-8
-def batch_sample_combination(beta: np.ndarray, n: int, N: int, rng: np.random.RandomState) -> np.ndarray:
-    beta = np.minimum(beta, 1 - EPS) # Avoid beta=1
+@functools.lru_cache
+def get_num_possible_swaps(n: int, k: int) -> np.ndarray:
+    res = np.zeros((k+1,), dtype=np.float64)
+    res[0] = 1.0
+    for i in range(1, k + 1):
+        res[i] = res[i-1] * (k - i + 1) * (n - k - i + 1) // (i ** 2)
+    return res
 
-    z = rng.uniform(size=(N, n))
-    pns = beta[:, None] ** (n - np.arange(n))[None, :]
-    z = (np.log(pns + z * (1-pns)) / np.log(beta)[:, None]).astype(int)
-    w = z.copy()
-    for i in range(1, n):
-        w[:, i:] += (w[:, i:] >= z[:, :-i])
-    return w
+def batch_sample_combination(beta: np.ndarray, origin: np.ndarray, k: int, rng: np.random.RandomState) -> np.ndarray:
+    n = origin.shape[-1]
+    N = beta.shape[-1]
+    nps = get_num_possible_swaps(n, k)
+    probs = np.cumsum(nps[None, :] * beta[:, None] ** np.arange(k+1), axis=-1)
+    probs /= probs[:, -1, None]
+    n_swaps = np.sum(rng.rand(N)[:, None] > probs, axis=-1)
+    result = origin.copy()
+    for i in range(N):
+        ones_selected = rng.choice(np.argwhere(origin[i, :])[:, 0] , size=(n_swaps[i],), replace=False)
+        zeros_selected = rng.choice(np.argwhere(~origin[i, :])[:, 0], size=(n_swaps[i],), replace=False)
+        result[i, ones_selected] = False
+        result[i, zeros_selected] = True
+    return result
 
-def batch_inversion_number(w: np.ndarray) -> np.ndarray:
-    inversion_num = np.zeros(w.shape[:-1], dtype=int)
-    for i in range(w.shape[-1]):
-        inversion_num += np.sum(w[..., i + 1:] < w[..., i, None], axis=-1)
-    return inversion_num
-
-def batch_log_pdf(beta: np.ndarray, w: np.ndarray) -> np.ndarray:
-    beta = np.minimum(beta, 1 - EPS) # Avoid beta=1
-
-    n = w.shape[-1]
-    inv_nums = batch_inversion_number(w)
-    log_scale = np.sum(np.log((1 - beta[..., None] ** (n - np.arange(n))) / (1 - beta[..., None])), axis=-1)
-    return inv_nums * np.maximum(np.log(beta), -1.0/EPS) - log_scale
+def batch_log_pdf(beta: np.ndarray, origin: np.ndarray, k: int, x: np.ndarray) -> np.ndarray:
+    return np.log(beta) * 0.5 * np.count_nonzero(origin != x, axis=-1)
+    

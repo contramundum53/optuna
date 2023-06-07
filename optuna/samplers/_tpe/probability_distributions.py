@@ -6,6 +6,7 @@ import numpy as np
 
 from optuna.samplers._tpe import _truncnorm
 from optuna.samplers._tpe import _permutation_distribution
+from optuna.samplers._tpe import _combination_distribution
 
 
 class _BatchedCategoricalDistributions(NamedTuple):
@@ -30,19 +31,26 @@ class _BatchedPermutationDistributions(NamedTuple):
     origin: np.ndarray
     beta: np.ndarray
 
+class _BatchedCombinationDistributions(NamedTuple):
+    origin: np.ndarray
+    beta: np.ndarray
+    k: int
+
 _BatchedDistributions = Union[
     _BatchedCategoricalDistributions,
     _BatchedTruncNormDistributions,
     _BatchedDiscreteTruncNormDistributions,
     _BatchedPermutationDistributions,
+    _BatchedCombinationDistributions,
 ]
-
 
 def _get_sampled_type(batched_distribution: _BatchedDistributions) -> tuple[np.dtype, tuple[...]]:
     if isinstance(batched_distribution, (_BatchedCategoricalDistributions, _BatchedTruncNormDistributions, _BatchedDiscreteTruncNormDistributions)):
         return (np.float64, ())
     elif isinstance(batched_distribution, _BatchedPermutationDistributions):
         return (int, (batched_distribution.origin.shape[1],))
+    elif isinstance(batched_distribution, _BatchedCombinationDistributions):
+        return (np.bool8, (batched_distribution.origin.shape[1],))
     else:
         raise NotImplementedError
 
@@ -94,6 +102,11 @@ class _MixtureOfProductDistribution(NamedTuple):
                     d.beta[active_indices], d.origin.shape[1], batch_size, rng
                 )
                 ret[param] = d.origin[active_indices[:, None], perm]
+            elif isinstance(d, _BatchedCombinationDistributions):
+                combin = _combination_distribution.batch_sample_combination(
+                    d.beta[active_indices], d.origin[active_indices, :], d.k, rng
+                )
+                ret[param] = combin
             else:
                 assert False
 
@@ -143,6 +156,10 @@ class _MixtureOfProductDistribution(NamedTuple):
                 ] = xi[:, None, :]
                 log_pdfs[:, :, i] = _permutation_distribution.batch_log_pdf(
                     d.beta[None, :], perm
+                )
+            elif isinstance(d, _BatchedCombinationDistributions):
+                log_pdfs[:, :, i] = _combination_distribution.batch_log_pdf(
+                    d.beta[None, :], d.origin[None, :], d.k, xi[:, None]
                 )
             else:
                 assert False
