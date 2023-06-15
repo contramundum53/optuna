@@ -35,7 +35,7 @@ class PreferentialGP:
         kernel,
         kernel_bounds,
         noise_std=1e-2,
-        sample_size=1000,
+        sample_size=1,
         burn_in=1000,
         thinning=1,
     ):
@@ -70,6 +70,12 @@ class PreferentialGP:
         if sample_size is None:
             sample_size = self.sample_size
 
+        # self.v_sample = orthants_MVN_iid_sampling(
+        #     dim=self.num_duels,
+        #     cov=self.K_v,
+        #     sample_size=sample_size,
+        # )
+
         # sampling from truncated multivariate normal
         self.v_sample = orthants_MVN_Gibbs_sampling(
             dim=self.num_duels,
@@ -80,32 +86,6 @@ class PreferentialGP:
             initial_sample=self.initial_sample,
         )
 
-        self.v_mean = np.mean(self.v_sample, axis=1)
-
-    def predict(self, X, full_cov=False):
-        cov_train_test = self.kernel.K(self.flatten_X, X)
-        posterior_mean = cov_train_test.T @ self.flatten_K_inv @ self.f_map
-
-        if full_cov:
-            cov_test = self.kernel.K(X, X)
-            posterior_cov = (
-                cov_test
-                - cov_train_test.T
-                @ np.linalg.inv(self.flatten_K + self.lambda_inv)
-                @ cov_train_test
-            )
-            return posterior_mean, posterior_cov
-        else:
-            var_test = self.kernel.Kdiag(X)
-            posterior_var = var_test - np.einsum(
-                "ij,jk,ki->i",
-                cov_train_test.T,
-                np.linalg.inv(self.flatten_K + self.lambda_inv),
-                cov_train_test,
-            )
-
-            return posterior_mean, np.c_[posterior_var]
-    
     def add_data(self, X_win, X_loo):
         X_win = np.atleast_2d(X_win)
         X_loo = np.atleast_2d(X_loo)
@@ -118,7 +98,6 @@ class PreferentialGP:
         self.A = np.c_[-1 * np.eye(self.num_duels), np.eye(self.num_duels)]
 
         self.initial_sample = None
-        self.v_sample = None
 
     def _covariance_X_v(self, X):
         X = np.atleast_2d(X)
@@ -154,24 +133,18 @@ class PreferentialGP:
             var = self.kernel.variance.values - np.einsum("ij,ji->i", tmp, K_X_v)
             return mean, var
 
-    def pdf(self, x1, x2, f):
-        X = np.r_[np.atleast_2d(x1), np.atleast_2d(x2)]
-        K_X_v = self._covariance_X_v(X)
-
-        tmp = K_X_v.T @ self.K_v_inv
-        mean = (tmp @ np.c_[self.v_sample]).T
-        cov = self.kernel.K(X) - tmp @ K_X_v
-        return np.mean(multivariate_normal.pdf(f - mean, cov=cov))
-
-    def mean(self, X):
-        K_X_v = self._covariance_X_v(X)
-        return K_X_v.T @ self.K_v_inv @ np.c_[self.v_mean]
-
 
 
 ############################################################################################
 # util functions and classes
 ############################################################################################
+
+from . import _tmvn_sampler
+def orthants_MVN_iid_sampling(
+    dim, cov, sample_size=1000,
+):
+    tmvn = _tmvn_sampler.TruncatedMVN(np.zeros(dim), np.copy(cov), np.zeros(dim), np.full(dim, np.inf))
+    return tmvn.sample(sample_size)
 
 
 def orthants_MVN_Gibbs_sampling(
