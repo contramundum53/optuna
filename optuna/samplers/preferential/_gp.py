@@ -70,12 +70,6 @@ class PreferentialGP:
         if sample_size is None:
             sample_size = self.sample_size
 
-        # self.v_sample = orthants_MVN_iid_sampling(
-        #     dim=self.num_duels,
-        #     cov=self.K_v,
-        #     sample_size=sample_size,
-        # )
-
         # sampling from truncated multivariate normal
         self.v_sample = orthants_MVN_Gibbs_sampling(
             dim=self.num_duels,
@@ -138,14 +132,6 @@ class PreferentialGP:
 ############################################################################################
 # util functions and classes
 ############################################################################################
-
-from . import _tmvn_sampler
-def orthants_MVN_iid_sampling(
-    dim, cov, sample_size=1000,
-):
-    tmvn = _tmvn_sampler.TruncatedMVN(np.zeros(dim), np.copy(cov), np.zeros(dim), np.full(dim, np.inf))
-    return tmvn.sample(sample_size)
-
 
 def orthants_MVN_Gibbs_sampling(
     dim, cov_inv, burn_in=500, thinning=1, sample_size=1000, initial_sample=None
