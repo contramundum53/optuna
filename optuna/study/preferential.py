@@ -132,7 +132,7 @@ def create_preferential_study(
     return PreferentialStudy(
         create_study(
             storage=storage, 
-            sampler=sampler._get_proxy_sampler(), 
+            sampler=sampler._get_proxy_sampler() if sampler is not None else None,
             study_name=study_name, 
             load_if_exists=load_if_exists
         ),
