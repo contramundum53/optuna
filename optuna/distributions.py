@@ -95,7 +95,7 @@ class BaseDistribution(abc.ABC):
         return self.__dict__ == other.__dict__
 
     def __hash__(self) -> int:
-        return hash((self.__class__,) + tuple(sorted(self.__dict__.items())))
+        return hash(self.__class__)
 
     def __repr__(self) -> str:
         kwargs = ", ".join("{}={}".format(k, v) for k, v in sorted(self._asdict().items()))
