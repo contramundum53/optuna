@@ -79,6 +79,32 @@ class GPSampler(optuna.samplers.BaseSampler):
             Y=values,
         )
         x, _ = optimize_acqf_sample(acqf, n_samples=512)
+        # xs, ys = np.meshgrid(*[np.linspace(0, 1, 100)] * 2)
+        # zs = np.zeros((100, 100))
+        # XX = np.ndarray((100, 100, 2))
+        # for i in range(100):
+        #     for j in range(100):
+        #         XX[i, j] = np.array([xs[i, j], ys[i, j]])
+        #         # x = np.array([xs[i, j], ys[i, j]])
+        #         # # zs[i, j] = acqf.cov_Y_Y_inv_Y @ kernel(torch.from_numpy(acqf.search_space.param_type == CATEGORICAL), acqf.kernel_params, torch.from_numpy(x[None, :]), torch.from_numpy(acqf.X)).detach().numpy()[0, :]
+        #         # zs[i, j] = eval_acqf_no_grad(acqf, x)
+        # from ._acqf import eval_acqf_no_grad
+        # zs = eval_acqf_no_grad(acqf, XX.reshape(-1, 2)).reshape(100, 100)
+        #         # zs = posterior(
+        #         #     torch.from_numpy(acqf.cov_Y_Y_inv), 
+        #         #     torch.from_numpy(acqf.cov_Y_Y_inv_Y),
+        #         #     kernel(torch.from_numpy(acqf.search_space.param_type == CATEGORICAL), acqf.kernel_params, torch.from_numpy(x), torch.from_numpy(acqf.X))),
+        #         #     acqf.kernel_params.kernel_scale,
+        #         # )[0]
+        # import matplotlib.pyplot as plt
+        # plt.figure()
+        # plt.imshow(zs, extent=(0, 1, 0, 1), origin="lower", cmap="jet", vmin=-20)
+        # plt.colorbar()
+        # plt.plot(transformed_params[:, 0], transformed_params[:, 1], "o")
+        # # raise RuntimeError()
+        #         # print(eval_acqf_no_grad(create_acqf(kernel_params, internal_search_space, transformed_params, values), x), end=" ")
+        # plt.plot(x[None, 0], x[None, 1], "r*")
+        # plt.show()
         return get_untransformed_param(search_space, x)
 
 
