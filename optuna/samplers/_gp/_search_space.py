@@ -58,7 +58,7 @@ def sample_transformed_params(n: int, search_space: SearchSpace) -> np.ndarray:
         if param_types[i] == CATEGORICAL:
             xs[:, i] = np.floor(xs[:, i] * bounds[i, 1])
         elif steps[i] != 0.0:
-            round_one_transformed_param(xs[:, i], param_types[i], (bounds[i, 0], bounds[i, 1]), steps[i])
+            xs[:, i] = round_one_transformed_param(xs[:, i], param_types[i], (bounds[i, 0], bounds[i, 1]), steps[i])
     return xs
 
 def get_search_space_and_transformed_params(
@@ -122,4 +122,7 @@ def get_untransformed_param(
                 step = distribution.step
             bounds = (distribution.low, distribution.high)
             ret[param] = untransform_one_param(transformed_param[i], param_type, bounds, step)
+            ret[param] = min(max(ret[param], distribution.low), distribution.high)
+            if isinstance(distribution, optuna.distributions.IntDistribution):
+                ret[param] = round(ret[param])
     return ret

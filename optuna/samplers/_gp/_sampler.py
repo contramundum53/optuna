@@ -4,7 +4,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 from ._search_space import get_search_space_and_transformed_params, get_untransformed_param, CATEGORICAL
 from ._gp import KernelParams, fit_kernel_params
-from ._optim._sample import optimize_acqf_sample
+from ._optim._mixed import optimize_acqf_mixed
 from ._acqf import create_acqf
 
 def default_log_prior(kernel_params: KernelParams) -> torch.Tensor:
@@ -78,7 +78,7 @@ class GPSampler(optuna.samplers.BaseSampler):
             X=transformed_params,
             Y=values,
         )
-        x, _ = optimize_acqf_sample(acqf, n_samples=512)
+        x, _ = optimize_acqf_mixed(acqf, initial_xs=transformed_params[None, np.argmax(values), :], n_additional_samples=2048)
         return get_untransformed_param(search_space, x)
 
 

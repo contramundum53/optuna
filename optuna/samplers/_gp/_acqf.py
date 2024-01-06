@@ -76,7 +76,7 @@ def eval_logei_with_grad(kernel_params: _gp.KernelParams, X: np.ndarray, is_cate
     Kxx = _gp.MATERN_KERNEL0 * kernel_params.kernel_scale
 
     (mean, var), (dmean_dKxX, dvar_dKxX) = posterior_with_grad_from_KxX(cov_Y_Y_inv, cov_Y_Y_inv_Y, KxX, Kxx)
-    val, dval_dmean, dval_dvar = logei_with_grad(mean, var + kernel_params.noise, max_Y)
+    val, dval_dmean, dval_dvar = logei_with_grad(mean, max(var, 1e-12), max_Y)
 
     dval_dKxX = (dval_dmean * dmean_dKxX + dval_dvar * dvar_dKxX)
     dval_dsqdist = dval_dKxX
@@ -88,7 +88,6 @@ def eval_logei_with_grad(kernel_params: _gp.KernelParams, X: np.ndarray, is_cate
             for i in range(X.shape[0]):
                 dval_dx[k] += 2 * dval_dsqdist[i] * (x[k] - X[i,k])
             dval_dx[k] *= kernel_params.inv_sq_lengthscales[k]
-
     return val, dval_dx
 
 class Acqf(NamedTuple):
