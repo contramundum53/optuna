@@ -21,6 +21,7 @@ from optuna.distributions import CategoricalChoiceType
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
+from optuna.distributions import AnyDistribution
 from optuna.trial import FrozenTrial
 from optuna.trial._base import _SUGGEST_INT_POSITIONAL_ARGS
 from optuna.trial._base import BaseTrial
@@ -408,6 +409,9 @@ class Trial(BaseTrial):
         # CategoricalDistribution does not support dynamic value space.
 
         return self._suggest(name, CategoricalDistribution(choices=choices))
+    
+    def suggest_any(self, name: str) -> Any:
+        return self._suggest(name, AnyDistribution())
 
     def report(self, value: float, step: int) -> None:
         """Report an objective function value for a given step.

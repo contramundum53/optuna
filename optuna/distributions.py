@@ -201,6 +201,18 @@ class FloatDistribution(BaseDistribution):
         return internal_repr
 
 
+class AnyDistribution(BaseDistribution):
+
+    def single(self) -> bool:
+        return False
+
+    def _contains(self, param_value_in_internal_repr: float) -> bool:
+        return True
+
+    def to_internal_repr(self, param_value_in_external_repr: float) -> float:
+        return param_value_in_external_repr
+
+
 @deprecated_class("3.0.0", "6.0.0", text=_float_distribution_deprecated_msg)
 class UniformDistribution(FloatDistribution):
     """A uniform distribution in the linear domain.
@@ -573,6 +585,7 @@ DISTRIBUTION_CLASSES = (
     LogUniformDistribution,
     DiscreteUniformDistribution,
     CategoricalDistribution,
+    AnyDistribution,
 )
 
 

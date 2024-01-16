@@ -11,6 +11,7 @@ from optuna.distributions import BaseDistribution
 from optuna.distributions import CategoricalDistribution
 from optuna.distributions import FloatDistribution
 from optuna.distributions import IntDistribution
+from optuna.distributions import AnyDistribution
 
 
 class _SearchSpaceTransform:
@@ -110,8 +111,9 @@ class _SearchSpaceTransform:
         for name, distribution in self._search_space.items():
             assert name in params, "Parameter configuration must contain all distributions."
             param = params[name]
-
-            if isinstance(distribution, CategoricalDistribution):
+            if isinstance(distribution, AnyDistribution):
+                raise ValueError("_SearchSpaceTransform does not support AnyDistribution.")
+            elif isinstance(distribution, CategoricalDistribution):
                 choice_idx = distribution.to_internal_repr(param)
                 trans_params[bound_idx + choice_idx] = 1
                 bound_idx += len(distribution.choices)
@@ -156,8 +158,9 @@ class _SearchSpaceTransform:
             self._search_space.items(), self.column_to_encoded_columns
         ):
             trans_param = trans_params[encoded_columns]
-
-            if isinstance(distribution, CategoricalDistribution):
+            if isinstance(distribution, AnyDistribution):
+                raise ValueError("_SearchSpaceTransform does not support AnyDistribution.")
+            elif isinstance(distribution, CategoricalDistribution):
                 # Select the highest rated one-hot encoding.
                 param = distribution.to_external_repr(trans_param.argmax())
             else:
@@ -187,7 +190,9 @@ def _transform_search_space(
     bound_idx = 0
     for distribution in search_space.values():
         d = distribution
-        if isinstance(d, CategoricalDistribution):
+        if isinstance(distribution, AnyDistribution):
+            raise ValueError("_SearchSpaceTransform does not support AnyDistribution.")
+        elif isinstance(d, CategoricalDistribution):
             n_choices = len(d.choices)
             bounds[bound_idx : bound_idx + n_choices] = (0, 1)  # Broadcast across all choices.
             encoded_columns = numpy.arange(bound_idx, bound_idx + n_choices)
@@ -245,9 +250,8 @@ def _transform_numerical_param(
     param: Union[int, float], distribution: BaseDistribution, transform_log: bool
 ) -> float:
     d = distribution
-
-    if isinstance(d, CategoricalDistribution):
-        assert False, "Should not reach. Should be one-hot encoded."
+    if isinstance(d, (CategoricalDistribution, AnyDistribution)):
+        assert False, "Should not reach."
     elif isinstance(d, FloatDistribution):
         if d.log:
             trans_param = math.log(param) if transform_log else float(param)
@@ -269,8 +273,8 @@ def _untransform_numerical_param(
 ) -> Union[int, float]:
     d = distribution
 
-    if isinstance(d, CategoricalDistribution):
-        assert False, "Should not reach. Should be one-hot encoded."
+    if isinstance(d, (CategoricalDistribution, AnyDistribution)):
+        assert False, "Should not reach."
     elif isinstance(d, FloatDistribution):
         if d.log:
             param = math.exp(trans_param) if transform_log else trans_param

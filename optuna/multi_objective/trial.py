@@ -138,6 +138,12 @@ class MultiObjectiveTrial:
 
         return self._trial.suggest_categorical(name, choices)
 
+    def suggest_any(
+        self,
+        name: str,
+    ) -> Any:
+        return self._trial.suggest_any(name)
+
     def report(self, values: Sequence[float], step: int) -> None:
         """Report intermediate objective function values for a given step.
 
