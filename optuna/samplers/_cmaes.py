@@ -271,7 +271,9 @@ class CmaEsSampler(BaseSampler):
         self._x0 = x0
         self._sigma0 = sigma0
         cmaes_seed, random_sampler_seed = self._fork_seed(seed, n_output=2)
-        self._independent_sampler = independent_sampler or optuna.samplers.RandomSampler(seed=random_sampler_seed)
+        self._independent_sampler = independent_sampler or optuna.samplers.RandomSampler(
+            seed=random_sampler_seed
+        )
         self._n_startup_trials = n_startup_trials
         self._warn_independent_sampling = warn_independent_sampling
         self._cma_rng = LazyRandomState(cmaes_seed)
