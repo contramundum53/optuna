@@ -1,4 +1,4 @@
-
+from __future__ import annotations
 from optuna._gp import gp
 from optuna._gp import search_space as gp_search_space
 from optuna._gp.acqf import AcquisitionFunctionParams, AcquisitionFunctionType
