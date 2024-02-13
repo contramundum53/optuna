@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import NamedTuple
 from enum import IntEnum
 import math
 from typing import TYPE_CHECKING
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from optuna._gp.gp import kernel
-from optuna._gp.gp import KernelParamsTensor
+from optuna._gp.gp import KernelParams, KernelParamsTensor
 from optuna._gp.gp import posterior
 from optuna._gp.search_space import ScaleType
 from optuna._gp.search_space import SearchSpace
@@ -64,10 +64,9 @@ class AcquisitionFunctionType(IntEnum):
     UCB = 1
 
 
-@dataclass(frozen=True)
-class AcquisitionFunctionParams:
+class AcquisitionFunctionParams(NamedTuple):
     acqf_type: AcquisitionFunctionType
-    kernel_params: KernelParamsTensor
+    kernel_params: KernelParams
     X: np.ndarray
     search_space: SearchSpace
     cov_Y_Y_inv: np.ndarray
@@ -79,7 +78,7 @@ class AcquisitionFunctionParams:
 
 def create_acqf_params(
     acqf_type: AcquisitionFunctionType,
-    kernel_params: KernelParamsTensor,
+    kernel_params: KernelParams,
     search_space: SearchSpace,
     X: np.ndarray,
     Y: np.ndarray,
@@ -88,10 +87,15 @@ def create_acqf_params(
 ) -> AcquisitionFunctionParams:
     X_tensor = torch.from_numpy(X)
     is_categorical = torch.from_numpy(search_space.scale_types == ScaleType.CATEGORICAL)
+    kernel_params_tensor = KernelParamsTensor(
+        inverse_squared_lengthscales=torch.from_numpy(kernel_params.inverse_squared_lengthscales),
+        kernel_scale=torch.tensor(kernel_params.kernel_scale, dtype=torch.float64),
+        noise_var=torch.tensor(kernel_params.noise_var, dtype=torch.float64),
+    )
     with torch.no_grad():
-        cov_Y_Y = kernel(is_categorical, kernel_params, X_tensor, X_tensor).detach().numpy()
+        cov_Y_Y = kernel(is_categorical, kernel_params_tensor, X_tensor, X_tensor).detach().numpy()
 
-    cov_Y_Y[np.diag_indices(X.shape[0])] += kernel_params.noise_var.item()
+    cov_Y_Y[np.diag_indices(X.shape[0])] += kernel_params.noise_var
     cov_Y_Y_inv = np.linalg.inv(cov_Y_Y)
 
     return AcquisitionFunctionParams(
@@ -109,7 +113,11 @@ def create_acqf_params(
 
 def eval_acqf(acqf_params: AcquisitionFunctionParams, x: torch.Tensor) -> torch.Tensor:
     mean, var = posterior(
-        acqf_params.kernel_params,
+        KernelParamsTensor(
+            inverse_squared_lengthscales=torch.from_numpy(acqf_params.kernel_params.inverse_squared_lengthscales),
+            kernel_scale=torch.tensor(acqf_params.kernel_params.kernel_scale, dtype=torch.float64),
+            noise_var=torch.tensor(acqf_params.kernel_params.noise_var, dtype=torch.float64),
+        ),
         torch.from_numpy(acqf_params.X),
         torch.from_numpy(acqf_params.search_space.scale_types == ScaleType.CATEGORICAL),
         torch.from_numpy(acqf_params.cov_Y_Y_inv),

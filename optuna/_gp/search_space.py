@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import IntEnum
 import math
 from typing import Any
 from typing import TYPE_CHECKING
+from typing import NamedTuple
 
 import numpy as np
 
@@ -29,8 +29,7 @@ class ScaleType(IntEnum):
     CATEGORICAL = 2
 
 
-@dataclass(frozen=True)
-class SearchSpace:
+class SearchSpace(NamedTuple):
     scale_types: np.ndarray
     bounds: np.ndarray
     steps: np.ndarray
