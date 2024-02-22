@@ -178,6 +178,7 @@ def local_search(acqf_params: AcquisitionFunctionParams, x0: np.ndarray, tol: fl
 def optimize_acqf_core(acqf_params: AcquisitionFunctionParams, x_samples: np.ndarray, n_local_search: int, tol: float) -> tuple[np.ndarray, float]:
     # Evaluate all values at initial samples
     f_vals = eval_acqf_no_grad(acqf_params, x_samples)
+    print(f_vals)
     max_i = np.argmax(f_vals)
 
     # Choose the start points of local search (sample from prob. exp(f_vals) without replacement)
@@ -190,12 +191,21 @@ def optimize_acqf_core(acqf_params: AcquisitionFunctionParams, x_samples: np.nda
 
     for i in idxs:
         x, f = local_search(acqf_params, x_samples[i, :], tol=tol)
+        assert f >= f_vals[i]
         if f > best_f:
-            best_x[:] = x
+            best_x = x
             best_f = f
 
     return best_x, best_f
 
 def optimize_acqf_mixed(acqf_params: AcquisitionFunctionParams, initial_xs: np.ndarray, n_additional_samples: int = 2048, n_local_search: int = 200, tol: float = 1e-4, seed: int | None = None) -> tuple[np.ndarray, float]:
     new_xs = sample_normalized_params(n_additional_samples, acqf_params.search_space, seed=seed)
-    return optimize_acqf_core(acqf_params=acqf_params, x_samples=np.vstack((initial_xs, new_xs)), n_local_search=n_local_search, tol=tol)
+    best_x, best_f = optimize_acqf_core(acqf_params=acqf_params, x_samples=new_xs, n_local_search=n_local_search, tol=tol)
+
+    for initial_x in initial_xs:
+        x, f = local_search(acqf_params, initial_x, tol=tol)
+        if f > best_f:
+            best_x = x
+            best_f = f
+
+    return best_x, best_f

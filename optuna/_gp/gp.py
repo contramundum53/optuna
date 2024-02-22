@@ -131,12 +131,14 @@ def marginal_log_likelihood(
     # We apply the cholesky decomposition to efficiently compute log(|C|) and C^-1.
 
     cov_fX_fX = kernel(is_categorical, kernel_params, X, X)
-
+    # print(kernel_params)
+    # print(np.linalg.eigvalsh(cov_fX_fX.detach().numpy()))
     cov_Y_Y_chol = torch.linalg.cholesky(
         cov_fX_fX + kernel_params.noise_var * torch.eye(X.shape[0], dtype=torch.float64)
     )
     # log |L| = 0.5 * log|L^T L| = 0.5 * log|C|
     logdet = 2 * torch.log(torch.diag(cov_Y_Y_chol)).sum()
+    
     # cov_Y_Y_chol @ cov_Y_Y_chol_inv_Y = Y --> cov_Y_Y_chol_inv_Y = inv(cov_Y_Y_chol) @ Y
     cov_Y_Y_chol_inv_Y = torch.linalg.solve_triangular(cov_Y_Y_chol, Y[:, None], upper=False)[:, 0]
     return -0.5 * (
@@ -153,7 +155,9 @@ def fit_kernel_params(
     is_categorical: np.ndarray,  # [len(params)]
     log_prior: Callable[[KernelParamsTensor], torch.Tensor],
     minimum_noise: float,
+    deterministic: bool,
     initial_kernel_params: KernelParams | None = None,
+    gtol: float = 1e-2,
 ) -> KernelParams:
     n_params = X.shape[1]
 
@@ -165,12 +169,15 @@ def fit_kernel_params(
             kernel_scale=torch.exp(raw_params_tensor[n_params]),
             noise_var=torch.exp(raw_params_tensor[n_params + 1]) + minimum_noise,
         )
+        if deterministic:
+            params = params._replace(noise_var=torch.tensor(minimum_noise, dtype=torch.float64))
         loss = -marginal_log_likelihood(
             torch.from_numpy(X), torch.from_numpy(Y), torch.from_numpy(is_categorical), params
         ) - log_prior(params)
         loss.backward()  # type: ignore
         return loss.item(), raw_params_tensor.grad.detach().numpy()  # type: ignore
 
+    
     default_initial_kernel_params = KernelParams(
         inverse_squared_lengthscales=np.ones(n_params),
         kernel_scale=1.0,
@@ -191,13 +198,13 @@ def fit_kernel_params(
                 np.log(initial_kernel_params.inverse_squared_lengthscales),
                 [
                     np.log(initial_kernel_params.kernel_scale),
-                    np.log(initial_kernel_params.noise_var - minimum_noise),
+                    np.log(initial_kernel_params.noise_var - 0.99 * minimum_noise),
                 ],
             ]
         )
 
         # loss_func may throw RuntimeError due to numerical errors.
-        res = so.minimize(loss_func, initial_raw_params, jac=True)
+        res = so.minimize(loss_func, initial_raw_params, jac=True, options={"gtol": gtol})
         if not res.success:
             raise RuntimeError(f"Optimization failed: {res.message}")
         return res.x
@@ -221,5 +228,5 @@ def fit_kernel_params(
     return KernelParams(
         inverse_squared_lengthscales=np.exp(raw_params_opt[:n_params]),
         kernel_scale=np.exp(raw_params_opt[n_params]),
-        noise_var=np.exp(raw_params_opt[n_params + 1]) + minimum_noise,
+        noise_var=minimum_noise if deterministic else np.exp(raw_params_opt[n_params + 1]) + minimum_noise,
     )

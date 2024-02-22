@@ -27,16 +27,16 @@ if TYPE_CHECKING:
     import optuna._gp.gp as gp
     # import optuna._gp.optim as optim
     import optuna._gp.search_space as gp_search_space
-    import optuna._gp.optim_mixed as optim_mixed
+    import optuna._gp.optim_mixed2 as optim_mixed
 else:
     from optuna._imports import _LazyImport
 
     torch = _LazyImport("torch")
     gp_search_space = _LazyImport("optuna._gp.search_space")
     gp = _LazyImport("optuna._gp.gp")
-    # optim = _LazyImport("optuna._gp.optim")
+    optim = _LazyImport("optuna._gp.optim")
     acqf = _LazyImport("optuna._gp.acqf")
-    optim_mixed = _LazyImport("optuna._gp.optim_mixed")
+    optim_mixed = _LazyImport("optuna._gp.optim_mixed2")
 
 
 def log_prior(kernel_params: "gp.KernelParamsTensor") -> "torch.Tensor":
@@ -49,9 +49,10 @@ def log_prior(kernel_params: "gp.KernelParamsTensor") -> "torch.Tensor":
     # NOTE(contramundum53): The parameters below were picked qualitatively.
     # TODO(contramundum53): Check whether these priors are appropriate.
     return (
-        gamma_log_prior(kernel_params.inverse_squared_lengthscales, 2, 0.5).sum()
+        # gamma_log_prior(kernel_params.inverse_squared_lengthscales.sqrt(), 2.0, 0.2).sum()
+        -(0.1 / kernel_params.inverse_squared_lengthscales + 0.1 * kernel_params.inverse_squared_lengthscales).sum()
         + gamma_log_prior(kernel_params.kernel_scale, 2, 1)
-        + gamma_log_prior(kernel_params.noise_var, 1.1, 20)
+        + gamma_log_prior(kernel_params.noise_var, 1.1, 60)
     )
 
 
@@ -93,6 +94,7 @@ class GPSampler(BaseSampler):
         seed: int | None = None,
         independent_sampler: BaseSampler | None = None,
         n_startup_trials: int = 10,
+        deterministic: bool = False,
     ) -> None:
         self._rng = LazyRandomState(seed)
         self._independent_sampler = independent_sampler or optuna.samplers.RandomSampler(seed=seed)
@@ -100,15 +102,21 @@ class GPSampler(BaseSampler):
         self._n_startup_trials = n_startup_trials
         self._log_prior: "Callable[[gp.KernelParamsTensor], torch.Tensor]" = log_prior
         self._minimum_noise: float = 1e-6
+        self._deterministic = deterministic
         # We cache the kernel parameters for initial values of fitting the next time.
         self._kernel_params_cache: "gp.KernelParams | None" = None
-        self._optimize_acqf: "Callable[[acqf.AcquisitionFunctionParams, np.ndarray, int | None], tuple[np.ndarray, float]]"
-        self._optimize_acqf = lambda acqf_params, best_params, seed: optim_mixed.optimize_acqf_mixed(
-            acqf_params, initial_xs=best_params[None, :], seed=seed,
+
+
+    def _optimize_acqf(self, acqf_params: "acqf.AcquisitionFunctionParams", best_params: np.ndarray, seed: int | None) -> tuple[np.ndarray, float]:
+        return optim_mixed.optimize_acqf_mixed(
+            acqf_params,
+            initial_xs=best_params[None, :],
+            seed=seed,
+            n_additional_samples=2048,
+            n_local_search=10,
+            tol=1e-4,
         )
-        # self._optimize_acqf = lambda acqf_params, best_params, seed: optim.optimize_acqf_sample(
-        #     acqf_params, n_samples=2048, seed=seed
-        # )
+
 
     def reseed_rng(self) -> None:
         self._rng.rng.seed()
@@ -175,9 +183,12 @@ class GPSampler(BaseSampler):
             ),
             log_prior=self._log_prior,
             minimum_noise=self._minimum_noise,
+            deterministic=self._deterministic,
             initial_kernel_params=self._kernel_params_cache,
         )
         self._kernel_params_cache = kernel_params
+
+        # print(kernel_params)
 
         acqf_params = acqf.create_acqf_params(
             acqf_type=acqf.AcquisitionFunctionType.LOG_EI,
@@ -189,12 +200,62 @@ class GPSampler(BaseSampler):
 
         best_params = normalized_params[np.argmax(standarized_score_vals)]
 
-        normalized_param, _ = self._optimize_acqf(
+        # # ===
+
+        # change_params = (0, 1)#(2, 3)
+        # params = np.array([
+        #     [
+        #         best_params[i] if i not in change_params else u if i == change_params[0] else v
+        #         for i in range(len(best_params))
+        #     ]
+        #     for u in np.linspace(0, 1, 100, endpoint=False)
+        #     for v in np.linspace(0, 1, 100, endpoint=False)
+        # ])
+
+        # for i in change_params:
+        #     if internal_search_space.scale_types[i] != gp_search_space.ScaleType.CATEGORICAL:
+        #         params[:, i] = gp_search_space.round_one_normalized_param(params[:, i], internal_search_space.scale_types[i], tuple(internal_search_space.bounds[i]), internal_search_space.steps[i])
+        #     else:
+        #         params[:, i] = np.floor(params[:, i] * internal_search_space.bounds[i, 1])
+
+        # res = acqf.eval_acqf_no_grad(acqf_params, params)
+        # # print(res)
+        # import matplotlib.pyplot as plt
+        # fig, ax = plt.subplots()
+        # fig.colorbar(ax.imshow(res.reshape(100, 100), vmin=-20,vmax=2, extent=(0, 1, 0, 1), origin='lower'))
+        
+        # # # === 
+        normalized_param, acqf_value = self._optimize_acqf(
             acqf_params,
             best_params,
             self._rng.rng.randint(np.iinfo(np.int32).max),
         )
-        return gp_search_space.get_unnormalized_param(search_space, normalized_param)
+
+        # # ===
+        # print(kernel_params)
+        # print(acqf_value)
+        # print(normalized_param)
+        # print(normalized_params[-1])
+        # print(gp.posterior(gp.KernelParamsTensor(
+        #         torch.from_numpy(kernel_params.inverse_squared_lengthscales),
+        #         torch.tensor(kernel_params.kernel_scale, dtype=torch.float64),
+        #         torch.tensor(kernel_params.noise_var, dtype=torch.float64)
+        #     ), torch.from_numpy(normalized_params), 
+        #     torch.from_numpy(internal_search_space.scale_types == gp_search_space.ScaleType.CATEGORICAL), 
+        #     torch.from_numpy(acqf_params.cov_Y_Y_inv), 
+        #     torch.from_numpy(acqf_params.cov_Y_Y_inv_Y), 
+        #     torch.from_numpy(normalized_param))
+        # )
+        # print(acqf_params.max_Y)
+
+        # ax.plot(normalized_param[change_params[1]], normalized_param[change_params[0]], 'ro')
+        # ax.plot(normalized_params[:, change_params[1]], normalized_params[:, change_params[0]], 'k.')
+        # ax.plot(params[:, change_params[1]], params[:, change_params[0]], 'b.')
+
+
+        ret = gp_search_space.get_unnormalized_param(search_space, normalized_param)
+        # print(ret)
+        return ret
 
     def sample_independent(
         self,

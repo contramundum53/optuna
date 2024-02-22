@@ -12,10 +12,5 @@ def optimize_acqf_sample(
     # Normalized parameter values are sampled.
     xs = sample_normalized_params(n_samples, acqf_params.search_space, seed=seed)
     res = acqf.eval_acqf_no_grad(acqf_params, xs)
-
-    # import matplotlib.pyplot as plt
-
-    # plt.scatter(xs[:, 1], xs[:, 0], c=res, vmin=-10, vmax=2)
-
     best_i = np.argmax(res)
     return xs[best_i, :], res[best_i]
