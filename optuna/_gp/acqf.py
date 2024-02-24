@@ -125,6 +125,8 @@ def eval_acqf(acqf_params: AcquisitionFunctionParams, x: torch.Tensor) -> torch.
         x,
     )
 
+    print(f"{mean=}, {var=}")
+
     if acqf_params.acqf_type == AcquisitionFunctionType.LOG_EI:
         return logei(mean=mean, var=var + acqf_params.acqf_stabilizing_noise, f0=acqf_params.max_Y)
     elif acqf_params.acqf_type == AcquisitionFunctionType.UCB:

@@ -52,7 +52,7 @@ def log_prior(kernel_params: "gp.KernelParamsTensor") -> "torch.Tensor":
         # gamma_log_prior(kernel_params.inverse_squared_lengthscales.sqrt(), 2.0, 0.2).sum()
         -(0.1 / kernel_params.inverse_squared_lengthscales + 0.1 * kernel_params.inverse_squared_lengthscales).sum()
         + gamma_log_prior(kernel_params.kernel_scale, 2, 1)
-        + gamma_log_prior(kernel_params.noise_var, 1.1, 60)
+        + gamma_log_prior(kernel_params.noise_var, 1.1, 30)
     )
 
 
