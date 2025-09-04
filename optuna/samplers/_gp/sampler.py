@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     import optuna._gp.acqf as acqf_module
     import optuna._gp.gp as gp
-    import optuna._gp.optim_mixed as optim_mixed
+    import optuna._gp.optim_mixed_batch as optim_mixed_batch
     import optuna._gp.prior as prior
     import optuna._gp.search_space as gp_search_space
     from optuna.distributions import BaseDistribution
@@ -38,7 +38,7 @@ else:
     torch = _LazyImport("torch")
     gp_search_space = _LazyImport("optuna._gp.search_space")
     gp = _LazyImport("optuna._gp.gp")
-    optim_mixed = _LazyImport("optuna._gp.optim_mixed")
+    optim_mixed_batch = _LazyImport("optuna._gp.optim_mixed_batch")
     acqf_module = _LazyImport("optuna._gp.acqf")
     prior = _LazyImport("optuna._gp.prior")
 
@@ -218,7 +218,7 @@ class GPSampler(BaseSampler):
         # However, we do not make any effort to keep backward compatibility between versions.
         # Particularly, we may remove this function in future refactoring.
         assert best_params is None or len(best_params.shape) == 2
-        normalized_params, _acqf_val = optim_mixed.optimize_acqf_mixed(
+        normalized_params, _acqf_val = optim_mixed_batch.optimize_acqf_mixed_batch(
             acqf,
             warmstart_normalized_params_array=best_params,
             n_preliminary_samples=self._n_preliminary_samples,

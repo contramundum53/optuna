@@ -54,7 +54,7 @@ def _gradient_ascent(
         (fval, grad) = acqf.eval_acqf_with_grad(normalized_params)
         # Flip sign because scipy minimizes functions.
         # Let the scaled acqf be g(x) and the acqf be f(sx), then dg/dx = df/dx * s.
-        return -fval, -grad[continuous_indices] * lengthscales
+        return -float(fval), -grad[continuous_indices] * lengthscales
 
     with single_blas_thread_if_scipy_v1_15_or_newer():
         scaled_cont_x_opt, neg_fval_opt, info = so.fmin_l_bfgs_b(
